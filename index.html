@@ -278,7 +278,7 @@ function formPedido() {
     '<label>Dirección<input name="dir" required placeholder="Calle y número"></label>' +
     '<div class="g2"><label>Piso / depto<input name="depto"></label><label>Cobrar en la puerta ($)<input name="cobrar" inputmode="numeric" placeholder="0 = ya pagado"></label></div>' +
     '<label>Nota para el repartidor<textarea name="nota" placeholder="Timbre, entre calles, etc."></textarea></label>' +
-    '<label class="ck"><input type="checkbox" name="wa" checked> Enviar el link de seguimiento por WhatsApp al guardar</label>' +
+    '<label class="ck"><input type="checkbox" name="wa"> Enviar el link por WhatsApp ahora (si no, lo mandás después con «Enviar link»)</label>' +
     '<div class="acts"><button type="button" class="btn" data-x>Cancelar</button><button class="btn y">Cargar pedido</button></div></form>');
   m.querySelector('[data-x]').onclick = closeModal;
   m.querySelector('[name=nombre]').focus();
