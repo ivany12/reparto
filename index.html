@@ -39,6 +39,7 @@ h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spa
 #mapwrap{position:relative;min-height:0;border-left:1px solid var(--line)}
 #map{position:absolute;inset:0;background:#0b0b0b}
 .leaflet-container{background:#0b0b0b;font-family:var(--body)}
+.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.5)}
 .banner{position:absolute;left:12px;right:12px;top:12px;z-index:900;background:var(--acc);color:var(--on-acc);font-weight:700;border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:center;justify-content:space-between}
 .banner button{background:#000;color:#fff;border:0;border-radius:8px;min-height:34px;padding:0 10px;font-weight:700;cursor:pointer}
 @media (max-width:899px){
@@ -104,7 +105,7 @@ const money = n => '$ ' + Math.round(n || 0).toLocaleString('es-AR');
 const mins = t => Math.max(0, Math.round((Date.now() - t) / 60000));
 const dayKey = t => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 const startOfDay = back => { const d = new Date(Date.now() - back * 86400000); d.setHours(0, 0, 0, 0); return d.getTime(); };
-const TILES = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', ATTR = '© OpenStreetMap · © CARTO';
+const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', ATTR = '© OpenStreetMap';
 const BASE_FALLBACK = { lat: -34.6045, lng: -58.4895 };
 
 let EMAIL = '', LOC = null, pedidos = [], posiciones = {}, placing = null, selId = null, started = false;
@@ -351,7 +352,7 @@ function initMap() {
   if (!window.L) { document.getElementById('map').innerHTML = '<div class="center"><p class="muted">No se pudo cargar el mapa.</p></div>'; return; }
   const b = (LOC && LOC.base) || BASE_FALLBACK;
   map = L.map('map', { zoomControl: true }).setView([b.lat, b.lng], 14);
-  L.tileLayer(TILES, { subdomains: 'abcd', maxZoom: 19, attribution: ATTR }).addTo(map);
+  L.tileLayer(TILES, { maxZoom: 19, attribution: ATTR }).addTo(map);
   map.attributionControl.setPrefix(false);
   map.on('click', e => { if (placing) fijarUbicacion(e.latlng); });
 }
