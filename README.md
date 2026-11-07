@@ -25,4 +25,4 @@ Nuevo pedido → (se abre WhatsApp con el link, enviado desde el celu/PC del loc
 ## Límites conocidos
 - La ubicación del repartidor se comparte solo con la app abierta y la pantalla prendida (la web no puede en segundo plano).
 - El ETA es estimado en línea recta ajustada, no por calles.
-- Mapa: tiles de OpenStreetMap (oscurecidos con un filtro CSS). CARTO ahora exige clave. Si el volumen crece, pasar a un proveedor con clave (MapTiler/Stadia) o a OpenFreeMap.
+- Mapa: vector de OpenFreeMap (gratis, sin clave) repintado en negro/gris con `map.js`; si falla, cae a tiles de OpenStreetMap con filtro oscuro. CARTO ya no sirve: exige clave.

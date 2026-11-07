@@ -7,6 +7,7 @@
 <title>Shivos Reparto</title>
 <link rel="icon" href="icon.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <style>
 @font-face{font-family:'HighVoltage';src:url(hv.woff2) format('woff2');font-weight:400;font-display:swap}
 :root{--bg:#000;--ink:#fff;--mute:#b3b3b3;--acc:#F1BB00;--on-acc:#000;--panel:#111;--panel2:#1b1b1b;--line:#303030;--ok:#4cd27a;--warn:#ff8a5c;
@@ -39,7 +40,7 @@ h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spa
 #mapwrap{position:relative;min-height:0;border-left:1px solid var(--line)}
 #map{position:absolute;inset:0;background:#0b0b0b}
 .leaflet-container{background:#0b0b0b;font-family:var(--body)}
-.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.5)}
+.osm-dark .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.5)}
 .banner{position:absolute;left:12px;right:12px;top:12px;z-index:900;background:var(--acc);color:var(--on-acc);font-weight:700;border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:center;justify-content:space-between}
 .banner button{background:#000;color:#fff;border:0;border-radius:8px;min-height:34px;padding:0 10px;font-weight:700;cursor:pointer}
 @media (max-width:899px){
@@ -97,6 +98,9 @@ h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spa
 <script src="config.js"></script>
 <script src="geo.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
+<script src="map.js"></script>
 <script type="module">
 import { ref, col, getDoc, setDoc, updateDoc, onSnapshot, query, where, keyOf, trackUrl, login, onUser, logout } from './fb.js';
 const $app = document.getElementById('app');
@@ -105,7 +109,6 @@ const money = n => '$ ' + Math.round(n || 0).toLocaleString('es-AR');
 const mins = t => Math.max(0, Math.round((Date.now() - t) / 60000));
 const dayKey = t => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 const startOfDay = back => { const d = new Date(Date.now() - back * 86400000); d.setHours(0, 0, 0, 0); return d.getTime(); };
-const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', ATTR = '© OpenStreetMap';
 const BASE_FALLBACK = { lat: -34.6045, lng: -58.4895 };
 
 let EMAIL = '', LOC = null, pedidos = [], posiciones = {}, placing = null, selId = null, started = false;
@@ -154,8 +157,9 @@ function start() {
     '<span class="chip" id="riders"><i></i><span>Sin repartidores</span></span>' +
     '<button class="btn y" id="nuevo">+ Nuevo pedido</button><button class="btn" id="aj">Ajustes</button><button class="btn" id="out">Salir</button></header>' +
     '<div class="tabs" role="group" aria-label="Vista"><button type="button" data-tab="pedidos" aria-pressed="true">Pedidos</button><button type="button" data-tab="mapa" aria-pressed="false">Mapa</button></div>' +
-    '<div class="layout"><section id="list" aria-label="Pedidos"></section><section id="mapwrap" aria-label="Mapa"><div id="banner" class="banner" hidden></div><div id="map"></div></section></div>';
+    '<div class="layout"><section id="list" aria-label="Pedidos"></section><section id="mapwrap" aria-label="Mapa"><div id="banner" class="banner" hidden></div><div id="map"></div><button type="button" class="btn sm" id="recentrar" style="position:absolute;left:12px;bottom:28px;z-index:900">Centrar en el local</button></section></div>';
   document.getElementById('nuevo').onclick = formPedido;
+  document.getElementById('recentrar').onclick = () => { const b = (LOC && LOC.base) || BASE_FALLBACK; map && map.flyTo([b.lat, b.lng], 15); };
   document.getElementById('aj').onclick = ajustes;
   document.getElementById('out').onclick = logout;
   document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
@@ -352,7 +356,7 @@ function initMap() {
   if (!window.L) { document.getElementById('map').innerHTML = '<div class="center"><p class="muted">No se pudo cargar el mapa.</p></div>'; return; }
   const b = (LOC && LOC.base) || BASE_FALLBACK;
   map = L.map('map', { zoomControl: true }).setView([b.lat, b.lng], 14);
-  L.tileLayer(TILES, { maxZoom: 19, attribution: ATTR }).addTo(map);
+  baseMap(map);
   map.attributionControl.setPrefix(false);
   map.on('click', e => { if (placing) fijarUbicacion(e.latlng); });
 }
