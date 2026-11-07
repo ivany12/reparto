@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signed() { return request.auth != null && request.auth.token.email_verified == true; }
+    function em() { return request.auth.token.email.lower(); }
+
+    /* ───────── Morfi (pausado, se deja tal cual) ───────── */
+    function member(t) { return signed() && em() in get(/databases/$(database)/documents/tenants/$(t)).data.members; }
+    match /tenants/{t} {
+      allow read: if signed() && em() in resource.data.members;
+      allow create: if signed() && request.resource.data.owner == em() && request.resource.data.members == [em()];
+      allow update: if signed() && resource.data.owner == em() && request.resource.data.owner == em() && em() in request.resource.data.members;
+      match /public/{d} { allow read: if true; allow write: if member(t); }
+      match /inbox/{d} {
+        allow get: if true;
+        allow create: if request.resource.data.estado == 'nuevo'
+          && request.resource.data.keys().hasOnly(['id','estado','tipo','mesa','zona','cliente','items','total','pago','nota','t'])
+          && request.resource.data.items is list && request.resource.data.items.size() > 0 && request.resource.data.items.size() <= 60
+          && request.resource.data.cliente.nombre is string && request.resource.data.cliente.nombre.size() <= 80;
+        allow list, update, delete: if member(t);
+      }
+      match /track/{d} { allow get: if true; allow list, write: if member(t); }
+      match /{c}/{d} { allow read, write: if member(t); }
+    }
+
+    /* ───────── Reparto ───────── */
+    function loc(l) { return get(/databases/$(database)/documents/reparto/$(l)); }
+    function isStaff(l) { return signed() && em() in loc(l).data.staff; }
+    function rkey() { return em().replace('[.]', ','); }
+    function isRider(l) { return signed() && rkey() in loc(l).data.riders; }
+
+    match /reparto/{l} {
+      // Lectura: equipo y repartidores. Si el local todavía no existe (primera vez) se deja leer para poder crearlo.
+      allow read: if signed() && (resource == null || em() in resource.data.staff || rkey() in resource.data.riders);
+      // Solo el dueño crea el local (única cuenta con permiso de alta) y solo el dueño lo modifica.
+      allow create: if signed() && em() == 'ivanyacar@gmail.com'
+        && request.resource.data.owner == em() && request.resource.data.staff == [em()];
+      allow update: if signed() && resource.data.owner == em()
+        && request.resource.data.owner == resource.data.owner && em() in request.resource.data.staff;
+
+      // Pedidos: el equipo todo; el repartidor lee y actualiza solo los que tiene asignados.
+      match /pedidos/{p} {
+        allow read: if isStaff(l) || (isRider(l) && resource.data.repartidorEmail == em());
+        allow create, delete: if isStaff(l);
+        allow update: if isStaff(l)
+          || (isRider(l) && resource.data.repartidorEmail == em()
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado','llegoT','entregaT','geo','orden','upd'])
+              && request.resource.data.estado in ['camino','entregado']);
+      }
+
+      // Seguimiento público: cualquiera con el link (token imposible de adivinar) lo lee; listar no.
+      match /track/{k} {
+        allow get: if true;
+        allow list: if isStaff(l);
+        allow create, delete: if isStaff(l);
+        allow update: if isStaff(l)
+          || (isRider(l) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['moto','antes','etaMin','estado','repartidor','dest','upd']));
+      }
+
+      // Posición en vivo de cada repartidor.
+      match /pos/{k} {
+        allow read: if isStaff(l);
+        allow create, update: if isRider(l) && k == rkey();
+        allow delete: if isStaff(l) || (isRider(l) && k == rkey());
+      }
+    }
+  }
+}

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Seguí tu pedido</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+@font-face{font-family:'HighVoltage';src:url(hv.woff2) format('woff2');font-weight:400;font-display:swap}
+:root{--bg:#000;--ink:#fff;--mute:#b3b3b3;--acc:#F1BB00;--on-acc:#000;--panel:#111;--line:#303030;--ok:#4cd27a;
+  --display:'HighVoltage','Bebas Neue',Impact,'Arial Narrow',sans-serif;--body:'Segoe UI',system-ui,-apple-system,Roboto,'Helvetica Neue',Arial,sans-serif}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 var(--body);overflow:hidden}
+#map{position:fixed;inset:0;background:#0b0b0b}
+.leaflet-container{background:#0b0b0b;font-family:var(--body)}
+.top{position:fixed;left:0;right:0;top:0;z-index:500;padding:calc(12px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-left,0px)) 0 max(14px,env(safe-area-inset-left,0px));display:flex;pointer-events:none}
+.brand{pointer-events:auto;font-family:var(--display);font-size:24px;line-height:1;color:var(--acc);background:#000;border-radius:10px;padding:8px 12px;letter-spacing:.5px}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:500;background:var(--panel);border-radius:22px 22px 0 0;border-top:1px solid var(--line);
+  padding:12px max(18px,env(safe-area-inset-left,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px;max-width:560px;margin:0 auto}
+.grab{width:42px;height:4px;border-radius:4px;background:var(--line);margin:0 auto}
+.kick{margin:0;font-size:13px;letter-spacing:1.2px;text-transform:uppercase;color:var(--mute)}
+.head{margin:0;font-family:var(--display);font-weight:400;font-size:34px;line-height:1;letter-spacing:.5px;color:var(--acc);text-wrap:balance}
+.eta{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.eta .big{font-family:var(--display);font-size:64px;line-height:.9}
+.eta .unit{font-family:var(--display);font-size:28px}
+.eta .at{font-size:15px;color:var(--mute)}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.steps li{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--mute)}
+.steps li:before{content:"";height:5px;border-radius:4px;background:var(--line);display:block}
+.steps li.d{color:var(--ink)}.steps li.d:before{background:var(--acc)}
+.note{background:#241c00;border:1px solid #5b4500;border-radius:12px;padding:10px 12px;font-size:15px;text-wrap:pretty}
+.who{display:flex;align-items:center;gap:12px;border-top:1px solid var(--line);padding-top:12px}
+.av{flex:none;width:44px;height:44px;border-radius:50%;background:var(--acc);color:var(--on-acc);display:grid;place-items:center;font-family:var(--display);font-size:24px}
+.who b{display:block;font-size:16px}.who span{font-size:14px;color:var(--mute)}
+.who a{margin-left:auto;flex:none;min-height:44px;display:inline-flex;align-items:center;padding:0 14px;border-radius:12px;border:1px solid var(--line);text-decoration:none;color:var(--ink);font-weight:700;font-size:14px}
+.dir{margin:0;font-size:14px;color:var(--mute);overflow-wrap:anywhere}
+.muted{color:var(--mute)}
+[hidden]{display:none!important}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+/* marcadores */
+.mk-moto{position:relative;width:44px;height:44px}
+.mk-moto .pulse{position:absolute;inset:0;border-radius:50%;background:var(--acc);opacity:.35;animation:pulse 1.8s ease-out infinite}
+.mk-moto .dot{position:absolute;inset:8px;border-radius:50%;background:var(--acc);border:3px solid #000;display:grid;place-items:center;transition:transform .4s}
+.mk-moto svg{width:16px;height:16px}
+.mk-dest{width:40px;height:40px;border-radius:50%;background:var(--acc);border:3px solid #000;display:grid;place-items:center;box-shadow:0 0 0 2px var(--acc)}
+.mk-dest svg{width:20px;height:20px}
+.mk-shop{width:34px;height:34px;border-radius:9px;background:#000;border:3px solid var(--acc);color:var(--acc);display:grid;place-items:center;font-family:var(--display);font-size:20px}
+@keyframes pulse{0%{transform:scale(.5);opacity:.5}100%{transform:scale(1.6);opacity:0}}
+@media (prefers-reduced-motion:reduce){.mk-moto .pulse{animation:none;opacity:.2}}
+</style>
+</head>
+<body>
+<div id="map" role="img" aria-label="Mapa con la ubicación de tu pedido"></div>
+<header class="top"><span class="brand" id="brand">…</span></header>
+<section class="sheet" id="sheet" aria-live="polite">
+  <div class="grab"></div>
+  <p class="kick" id="kick">Cargando…</p>
+  <h1 class="head" id="head"></h1>
+  <div class="eta" id="eta" hidden><span class="big" id="big"></span><span class="unit">min</span><span class="at" id="at"></span></div>
+  <p class="at muted" id="sub" hidden></p>
+  <ol class="steps" id="steps"><li>Preparando</li><li>En camino</li><li>Llegando</li><li>Entregado</li></ol>
+  <div class="note" id="note" hidden></div>
+  <div class="who" id="who" hidden><div class="av" id="av"></div><div><b id="rn"></b><span>Tu repartidor</span></div><a id="wa" href="#" target="_blank" rel="noopener" hidden></a></div>
+  <p class="dir" id="dir"></p>
+</section>
+<script src="config.js"></script>
+<script src="geo.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script type="module">
+const q = new URLSearchParams(location.search), L_ = q.get('l') || window.REPARTO_LOCAL || 'shivos', T = q.get('t');
+const $ = s => document.getElementById(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const TILES = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'; // mapa oscuro; cambiable por otro proveedor
+const ATTR = '© OpenStreetMap · © CARTO';
+const STEP = { preparando: 0, listo: 0, camino: 1, llego: 2, entregado: 3, cancelado: 0 };
+
+function fail(title, detail) {
+  $('map').hidden = true; $('who').hidden = true; $('eta').hidden = true; $('steps').hidden = true; $('note').hidden = true; $('sub').hidden = true;
+  $('kick').textContent = ''; $('head').textContent = title; $('dir').textContent = detail;
+}
+if (!T || !window.FIREBASE_CONFIG) { fail('Link no válido', 'Pedile al local que te lo mande de nuevo.'); throw 0; }
+
+const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
+const { getFirestore, doc, getDoc, onSnapshot } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+const db = getFirestore(initializeApp(window.FIREBASE_CONFIG));
+
+/* ── mapa ── */
+let map = null, motoM = null, destM = null, shopM = null, line = null, cur = null, anim = 0, lastFit = 0, userMoved = 0, D = null;
+const hasMap = !!window.L;
+if (hasMap) {
+  map = L.map('map', { zoomControl: false, attributionControl: true }).setView([-34.6037, -58.3816], 13);
+  L.tileLayer(TILES, { subdomains: 'abcd', maxZoom: 19, attribution: ATTR }).addTo(map);
+  map.attributionControl.setPrefix(false);
+  map.on('dragstart zoomstart', e => { if (e.originalEvent || e.type === 'dragstart') userMoved = Date.now(); });
+} else { $('map').hidden = true; }
+const ARROW = '<svg viewBox="0 0 16 16"><path d="M8 1L14 14L8 11L2 14Z" fill="#000"/></svg>';
+const HOUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11L12 3L21 11M6 9.5V21H18V9.5"/></svg>';
+const icon = (html, size) => L.divIcon({ html, className: '', iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+function setDest(p) {
+  if (!hasMap || !p) return;
+  if (!destM) destM = L.marker([p.lat, p.lng], { icon: icon('<div class="mk-dest">' + HOUSE + '</div>', 40), interactive: false, keyboard: false }).addTo(map);
+  else destM.setLatLng([p.lat, p.lng]);
+}
+function moveMoto(p) {
+  if (!hasMap || !p) return;
+  if (!motoM) {
+    motoM = L.marker([p.lat, p.lng], { icon: icon('<div class="mk-moto"><i class="pulse"></i><div class="dot" id="dot">' + ARROW + '</div></div>', 44), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
+    cur = { lat: p.lat, lng: p.lng };
+  } else {
+    const from = { ...cur }, t0 = performance.now(), dur = 1500;
+    cancelAnimationFrame(anim);
+    const step = t => {
+      const k = Math.min(1, (t - t0) / dur), e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      cur = { lat: from.lat + (p.lat - from.lat) * e, lng: from.lng + (p.lng - from.lng) * e };
+      motoM.setLatLng([cur.lat, cur.lng]);
+      if (k < 1) anim = requestAnimationFrame(step);
+    };
+    anim = requestAnimationFrame(step);
+  }
+  const dot = document.getElementById('dot');
+  if (dot && isFinite(p.hdg)) dot.style.transform = 'rotate(' + p.hdg + 'deg)';
+}
+function fit(force) {
+  if (!hasMap) return;
+  const now = Date.now();
+  if (!force && (now - userMoved < 20000 || now - lastFit < 6000)) return;
+  lastFit = now;
+  const pts = [];
+  if (D && D.moto && D.estado !== 'entregado') pts.push([D.moto.lat, D.moto.lng]);
+  if (D && D.dest) pts.push([D.dest.lat, D.dest.lng]);
+  if (!pts.length) return;
+  const padB = Math.round($('sheet').getBoundingClientRect().height) + 30;
+  if (pts.length === 1) map.setView(pts[0], 16, { animate: true });
+  else map.fitBounds(pts, { paddingTopLeft: [50, 80], paddingBottomRight: [50, padB], maxZoom: 17, animate: true });
+}
+
+/* ── pantalla ── */
+function render() {
+  if (!D) return;
+  $('map').hidden = !hasMap; $('steps').hidden = false; // por si antes se mostró el error "link no válido" y el pedido recién se creó
+  const st = D.estado || 'preparando', now = Date.now();
+  const antes = D.antes || 0;
+  $('brand').textContent = D.local || 'Seguí tu pedido';
+  if (D.color && /^#[0-9a-f]{6}$/i.test(D.color)) document.documentElement.style.setProperty('--acc', D.color);
+  $('kick').textContent = 'Pedido #' + D.num + (D.local ? ' · ' + D.local : '');
+  let eta = null;
+  if (st === 'camino' && typeof D.etaMin === 'number' && D.moto) eta = Math.max(1, Math.round(D.etaMin - Math.max(0, now - (D.moto.t || D.upd || now)) / 60000));
+  let head, sub = '', note = '';
+  if (st === 'preparando') { head = 'Estamos cocinando'; sub = 'Sale en breve. Te avisamos acá.'; }
+  else if (st === 'listo') { head = 'Tu pedido está listo'; sub = 'Esperando al repartidor.'; }
+  else if (st === 'camino') {
+    if (antes > 0) { head = antes === 1 ? 'Entrega otro pedido antes' : 'Entrega ' + antes + ' pedidos antes'; note = 'Tu repartidor entrega ' + (antes === 1 ? 'otro pedido' : antes + ' pedidos') + ' antes que el tuyo. Después va directo con vos.'; }
+    else head = eta !== null && eta <= 2 ? 'Ya casi llega' : 'Va hacia vos';
+    if (eta === null) sub = D.moto ? '' : 'Ya salió. En unos minutos llega.';
+  }
+  else if (st === 'llego') { head = 'Llegó. Salí a recibirlo'; sub = 'Ya está en tu puerta.'; }
+  else if (st === 'cancelado') { head = 'Pedido cancelado'; sub = 'Escribile al local si tenés dudas.'; }
+  else { head = 'Entregado. Que lo disfrutes'; sub = 'Gracias por pedir' + (D.local ? ' en ' + D.local : '') + '.'; }
+  $('head').textContent = head;
+  $('eta').hidden = eta === null;
+  if (eta !== null) {
+    $('big').textContent = eta;
+    $('at').textContent = 'Llega aprox. ' + new Date(now + eta * 60000).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  }
+  const stale = st === 'camino' && D.moto && now - (D.moto.t || 0) > 120000 ? 'Última señal hace ' + Math.round((now - D.moto.t) / 60000) + ' min.' : '';
+  sub = [sub, stale].filter(Boolean).join(' ');
+  $('sub').hidden = !sub; $('sub').textContent = sub;
+  $('note').hidden = !note; $('note').textContent = note;
+  const s = STEP[st] ?? 0;
+  [...$('steps').children].forEach((li, i) => li.classList.toggle('d', i <= s));
+  $('steps').hidden = st === 'cancelado';
+  const who = D.repartidor && st !== 'preparando' && st !== 'listo' && st !== 'cancelado';
+  $('who').hidden = !who;
+  if (who) {
+    $('rn').textContent = D.repartidor; $('av').textContent = D.repartidor[0].toUpperCase();
+    const w = $('wa');
+    if (D.tel) { w.hidden = false; w.textContent = 'Escribirle a ' + (D.local || 'el local'); w.href = 'https://wa.me/' + GEO.waPhone(D.tel); } else w.hidden = true;
+  }
+  $('dir').textContent = D.dir || '';
+  if (D.dest) setDest(D.dest);
+  if (D.moto && st === 'camino') moveMoto(D.moto);
+  else if (motoM && (st === 'entregado' || st === 'llego')) { if (D.dest) moveMoto(st === 'entregado' ? D.dest : (D.moto || D.dest)); }
+  if (hasMap) {
+    if (line) { map.removeLayer(line); line = null; }
+    if (st === 'camino' && D.moto && D.dest) line = L.polyline([[D.moto.lat, D.moto.lng], [D.dest.lat, D.dest.lng]], { color: getComputedStyle(document.documentElement).getPropertyValue('--acc').trim() || '#F1BB00', weight: 4, opacity: .9, dashArray: '2 10', lineCap: 'round' }).addTo(map);
+    if (st === 'preparando' || st === 'listo') { if (motoM) { map.removeLayer(motoM); motoM = null; } }
+    fit(!render.did); render.did = true;
+  }
+}
+setInterval(() => D && render(), 30000); // refresca el "hace X min" y el horario aunque no lleguen datos nuevos
+
+onSnapshot(doc(db, 'reparto', L_, 'track', T), s => {
+  if (!s.exists()) { fail('Link no válido', 'Este pedido no existe o ya venció. Escribile al local.'); return; }
+  D = s.data(); render();
+}, err => { console.error(err); fail('No pudimos cargar tu pedido', 'Revisá tu conexión y volvé a abrir el link.'); });
+</script>
+</body>
+</html>

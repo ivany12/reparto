@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Shivos Reparto</title>
+<link rel="icon" href="icon.svg">
+<style>
+@font-face{font-family:'HighVoltage';src:url(hv.woff2) format('woff2');font-weight:400;font-display:swap}
+:root{--bg:#000;--ink:#fff;--mute:#b3b3b3;--acc:#F1BB00;--on-acc:#000;--panel:#111;--panel2:#1b1b1b;--line:#303030;--ok:#4cd27a;--warn:#ff8a5c;
+  --display:'HighVoltage','Bebas Neue',Impact,'Arial Narrow',sans-serif;--body:'Segoe UI',system-ui,-apple-system,Roboto,'Helvetica Neue',Arial,sans-serif}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 var(--body)}
+button{font:inherit;color:inherit}
+[hidden]{display:none!important}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+#app{height:100%;display:flex;flex-direction:column;max-width:520px;margin:0 auto}
+.rh{flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:calc(12px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-left,0px)) 8px}
+.wm{font-family:var(--display);color:var(--acc);font-size:26px;line-height:1;letter-spacing:.5px}
+.rt{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;color:var(--mute)}
+.chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-size:13px;font-weight:600;background:none;cursor:pointer;min-height:34px}
+.chip i{width:9px;height:9px;border-radius:50%;background:var(--mute);display:block}
+.chip.ok i{background:var(--ok)}.chip.warn i{background:var(--warn)}
+.sp{margin-left:auto}
+.scroll{flex:1;min-height:0;overflow-y:auto;padding:4px max(16px,env(safe-area-inset-left,0px)) 16px;display:flex;flex-direction:column;gap:12px}
+.banner{background:#241c00;border:1px solid #5b4500;border-radius:12px;padding:10px 12px;font-size:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.card.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
+.ct{display:flex;gap:12px;align-items:flex-start}
+.num{flex:none;width:46px;height:46px;border-radius:12px;background:var(--panel2);display:grid;place-items:center;font-family:var(--display);font-size:26px;line-height:1}
+.card.on .num{background:var(--acc);color:var(--on-acc)}
+.cb{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.cn{font-weight:700;font-size:18px;overflow-wrap:anywhere}
+.cd{font-size:17px;overflow-wrap:anywhere}
+.cm{font-size:14px;color:var(--mute);display:flex;flex-wrap:wrap;gap:2px 12px}
+.pay{flex:none;font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding:4px 9px;border-radius:99px;border:1px solid var(--line);white-space:nowrap}
+.pay.cobrar{background:var(--warn);color:#000;border-color:var(--warn)}.pay.ok{color:var(--ok);border-color:var(--ok)}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.btn{min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);cursor:pointer;font-weight:700;font-size:15px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)}
+.btn.y{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}
+.act{flex:none;padding:12px max(16px,env(safe-area-inset-left,0px)) calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line)}
+.go{width:100%;min-height:68px;border-radius:16px;border:0;background:var(--acc);color:var(--on-acc);font-family:var(--display);font-size:28px;letter-spacing:1px;cursor:pointer;line-height:1.1;padding:8px 12px}
+.go.ok{background:var(--ok);color:#00170a}
+.go:disabled{background:var(--panel2);color:var(--mute);cursor:default}
+h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:.6px}
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
+.muted{color:var(--mute)}
+.toast{position:fixed;left:50%;bottom:calc(100px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#fff;color:#000;border-radius:12px;padding:10px 14px;display:flex;gap:14px;align-items:center;font-weight:600;z-index:9}
+.toast button{background:none;border:0;font-weight:800;text-decoration:underline;cursor:pointer;color:#000}
+</style>
+</head>
+<body>
+<div id="app"><div class="center"><p class="muted">Cargando…</p></div></div>
+<script src="config.js"></script>
+<script src="geo.js"></script>
+<script type="module">
+import { ref, col, getDoc, setDoc, updateDoc, onSnapshot, query, where, deleteField, keyOf, login, onUser, logout } from './fb.js';
+const $app = document.getElementById('app');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = n => '$ ' + Math.round(n || 0).toLocaleString('es-AR');
+const ls = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { } } };
+
+let EMAIL = '', ME = '', LOC = null, orders = [], order = [], unsub = null;
+let pos = null, gps = 'idle', watchId = null, lastSent = 0, lock = null;
+const screen = html => { render.last = null; $app.innerHTML = html; };
+const center = html => screen('<div class="center">' + html + '</div>');
+
+/* ── entrada ── */
+function loginScreen() {
+  center('<div class="wm" style="font-size:40px">Reparto</div><p class="muted">Entrá con tu cuenta de Google para ver tus pedidos.</p><button class="go" id="g" style="max-width:320px">Entrar</button>');
+  document.getElementById('g').onclick = login;
+}
+onUser(async user => {
+  if (!user) return loginScreen();
+  EMAIL = (user.email || '').toLowerCase();
+  center('<p class="muted">Cargando…</p>');
+  try {
+    const s = await getDoc(ref());
+    LOC = s.exists() ? s.data() : null;
+  } catch (e) { console.error(e); LOC = null; }
+  ME = LOC && LOC.riders && LOC.riders[keyOf(EMAIL)];
+  if (!ME) {
+    center('<h2>Sin acceso</h2><p class="muted">La cuenta ' + esc(EMAIL) + ' no figura como repartidor. Pedile al local que la agregue en Ajustes.</p><button class="btn" id="out">Salir</button>');
+    document.getElementById('out').onclick = logout; return;
+  }
+  if (LOC.color && /^#[0-9a-f]{6}$/i.test(LOC.color)) document.documentElement.style.setProperty('--acc', LOC.color);
+  try { order = JSON.parse(ls.get('rep_order') || '[]'); } catch { order = []; }
+  watchOrders();
+});
+
+/* ── pedidos ── */
+function watchOrders() {
+  unsub && unsub();
+  unsub = onSnapshot(query(col('pedidos'), where('repartidorEmail', '==', EMAIL), where('estado', '==', 'camino')), snap => {
+    orders = []; snap.forEach(d => orders.push(d.data()));
+    sync();
+  }, err => { console.error(err); center('<h2>Sin conexión con el local</h2><p class="muted">' + esc(err.code) + '</p><button class="btn" onclick="location.reload()">Reintentar</button>'); });
+}
+function stops() {
+  const rank = id => { const i = order.indexOf(id); return i < 0 ? 1e9 : i; };
+  return orders.slice().sort((a, b) => rank(a.id) - rank(b.id) || (a.orden || 0) - (b.orden || 0) || (a.salio || a.creado || 0) - (b.salio || b.creado || 0));
+}
+const geoTried = new Set();
+function ensureGeo(o) {
+  if (o.geo || geoTried.has(o.id) || !o.dir) return;
+  geoTried.add(o.id);
+  GEO.geocode(o.dir).then(g => {
+    if (!g) return;
+    o.geo = g;
+    updateDoc(ref('pedidos', o.id), { geo: g, upd: Date.now() }).catch(() => { });
+    if (o.track) updateDoc(ref('track', o.track), { dest: { lat: g.lat, lng: g.lng } }).catch(() => { });
+    publish(true); render();
+  });
+}
+function sync() {
+  const s = stops();
+  s.forEach(ensureGeo);
+  if (s.length && watchId === null) startGps();
+  if (!s.length && watchId !== null) stopGps();
+  s.forEach(o => { if (o.track) updateDoc(ref('track', o.track), { estado: o.llegoT ? 'llego' : 'camino', repartidor: ME, upd: Date.now() }).catch(() => { }); });
+  publish(true); render();
+}
+
+/* ── GPS ── */
+function startGps() {
+  if (!navigator.geolocation) { gps = 'no'; return; }
+  gps = 'wait';
+  watchId = navigator.geolocation.watchPosition(onPos, e => { gps = e.code === 1 ? 'denied' : 'wait'; render(); }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+  wake();
+}
+function stopGps() {
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  watchId = null; gps = 'idle';
+  if (pos) setDoc(ref('pos', keyOf(EMAIL)), { name: ME, activo: false, t: Date.now() }).catch(() => { });
+  pos = null;
+  lock && lock.release().catch(() => { }); lock = null;
+}
+function onPos(p) {
+  const c = { lat: p.coords.latitude, lng: p.coords.longitude };
+  let hdg = pos ? pos.hdg : 0;
+  if (p.coords.heading != null && isFinite(p.coords.heading) && (p.coords.speed || 0) > 1) hdg = p.coords.heading;
+  else if (pos && GEO.dist(pos, c) > 8) hdg = GEO.bearing(pos, c);
+  pos = { ...c, hdg: Math.round(hdg), acc: Math.round(p.coords.accuracy || 0), t: Date.now() };
+  gps = 'ok';
+  publish(false); render();
+}
+async function wake() {
+  try { if ('wakeLock' in navigator && !lock && document.visibilityState === 'visible') { lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => { lock = null; render(); }); render(); } } catch { }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && watchId !== null) { wake(); publish(true); } });
+function publish(force) {
+  const now = Date.now();
+  if (!pos || !ME) return;
+  if (!force && now - lastSent < 4000) return;
+  lastSent = now;
+  const s = stops();
+  setDoc(ref('pos', keyOf(EMAIL)), { name: ME, lat: pos.lat, lng: pos.lng, hdg: pos.hdg, t: now, activo: true }).catch(() => { });
+  s.forEach((o, i) => {
+    if (!o.track) return;
+    const eta = GEO.etaMin(pos, s.slice(0, i + 1).map(x => x.geo));
+    updateDoc(ref('track', o.track), {
+      moto: { lat: pos.lat, lng: pos.lng, hdg: pos.hdg, t: now }, antes: i, etaMin: eta, estado: o.llegoT ? 'llego' : 'camino', repartidor: ME, upd: now
+    }).catch(() => { });
+  });
+}
+setInterval(() => publish(true), 20000);
+
+/* ── acciones ── */
+function llego(o) {
+  const t = Date.now();
+  o.llegoT = t;
+  updateDoc(ref('pedidos', o.id), { llegoT: t, upd: t }).catch(e => toast('No se pudo guardar: ' + e.code));
+  if (o.track) updateDoc(ref('track', o.track), { estado: 'llego', upd: t }).catch(() => { });
+  render();
+}
+function entregado(o) {
+  const t = Date.now();
+  updateDoc(ref('pedidos', o.id), { estado: 'entregado', entregaT: t, upd: t }).catch(e => toast('No se pudo guardar: ' + e.code));
+  if (o.track) updateDoc(ref('track', o.track), { estado: 'entregado', upd: t, antes: 0 }).catch(() => { });
+  orders = orders.filter(x => x.id !== o.id);
+  toast('Entregado a ' + (o.nombre || 'cliente'), 'Deshacer', () => {
+    const u = Date.now();
+    updateDoc(ref('pedidos', o.id), { estado: 'camino', entregaT: deleteField(), upd: u }).catch(() => { });
+    if (o.track) updateDoc(ref('track', o.track), { estado: 'llego', upd: u }).catch(() => { });
+  });
+  sync();
+}
+function primero(o) { order = [o.id, ...stops().map(x => x.id).filter(id => id !== o.id)]; ls.set('rep_order', JSON.stringify(order)); sync(); }
+let tt = 0;
+function toast(msg, label, fn) {
+  document.querySelectorAll('.toast').forEach(x => x.remove());
+  const d = document.createElement('div'); d.className = 'toast'; d.textContent = msg;
+  if (label) { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { fn(); d.remove(); }; d.appendChild(b); }
+  document.body.appendChild(d); clearTimeout(tt); tt = setTimeout(() => d.remove(), label ? 7000 : 2500);
+}
+
+/* ── pantalla ── */
+function render() {
+  if (!ME) return;
+  const s = stops(), cur = s[0];
+  const gpsChip = { ok: ['ok', 'GPS activo'], wait: ['warn', 'Buscando GPS…'], denied: ['warn', 'GPS sin permiso'], no: ['warn', 'Sin GPS'], idle: ['', 'GPS en espera'] }[gps];
+  const head = '<header class="rh"><span class="wm">' + esc(LOC.nombre || 'Shivo\'s') + '</span><span class="rt">Reparto</span><span class="sp"></span>' +
+    '<span class="chip ' + gpsChip[0] + '"><i></i>' + gpsChip[1] + '</span><button class="chip" id="who" aria-label="Salir">' + esc(ME) + '</button></header>';
+  let body, act = '';
+  if (!s.length) {
+    body = '<div class="center"><h2>Sin pedidos en camino</h2><p class="muted">Cuando el local te despache un pedido, aparece acá y se prende el GPS solo.</p></div>';
+  } else {
+    const warn = gps === 'denied' ? '<div class="banner">Activá la ubicación de este navegador para que el cliente vea la moto: Ajustes del celu, Safari o Chrome, Ubicación, Permitir.</div>'
+      : gps === 'ok' && !lock ? '<div class="banner">Dejá esta pantalla abierta y prendida mientras repartís. Si cambiás de app o apagás la pantalla, el cliente deja de ver la moto.</div>' : '';
+    body = '<div class="scroll">' + warn + s.map((o, i) => {
+      const on = i === 0, cobrar = +o.cobrar || 0;
+      return '<div class="card' + (on ? ' on' : '') + '"><div class="ct"><div class="num">' + (i + 1) + '</div><div class="cb"><span class="cn">' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' +
+        '<span class="cm"><span>Pedido #' + o.num + '</span>' + (o.nota ? '<span>' + esc(o.nota) + '</span>' : '') + '</span></div>' +
+        '<span class="pay ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></div>' +
+        '<div class="row">' + (o.tel ? '<a class="btn" href="tel:' + esc(String(o.tel).replace(/[^\d+]/g, '')) + '">Llamar</a>' : '') + (!on ? '<button class="btn" data-first="' + o.id + '">Ir primero</button>' : '') + '</div></div>';
+    }).join('') + '</div>';
+    const got = !!cur.llegoT;
+    act = '<div class="act"><button class="go ' + (got ? 'ok' : '') + '" id="go">' + (got ? 'Entregado ✓' : 'Llegué a ' + esc(cur.nombre || 'destino')) + '</button></div>';
+  }
+  const html = head + body + act;
+  if (html === render.last) return; // no tocamos el DOM si no cambió nada visible: así no se pierden toques
+  $app.innerHTML = html; render.last = html;
+  const w = document.getElementById('who'); if (w) w.onclick = logout;
+  document.querySelectorAll('[data-first]').forEach(b => b.onclick = () => primero(orders.find(x => x.id === b.dataset.first)));
+  const g = document.getElementById('go'); if (g) g.onclick = () => { const o = stops()[0]; o.llegoT ? entregado(o) : llego(o); };
+}
+setInterval(() => { if (ME) render(); }, 15000);
+</script>
+</body>
+</html>

@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Shivos Reparto</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+@font-face{font-family:'HighVoltage';src:url(hv.woff2) format('woff2');font-weight:400;font-display:swap}
+:root{--bg:#000;--ink:#fff;--mute:#b3b3b3;--acc:#F1BB00;--on-acc:#000;--panel:#111;--panel2:#1b1b1b;--line:#303030;--ok:#4cd27a;--warn:#ff8a5c;
+  --display:'HighVoltage','Bebas Neue',Impact,'Arial Narrow',sans-serif;--body:'Segoe UI',system-ui,-apple-system,Roboto,'Helvetica Neue',Arial,sans-serif}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 var(--body)}
+button,input,select,textarea{font:inherit;color:inherit}
+[hidden]{display:none!important}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+#app{height:100%;display:flex;flex-direction:column}
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
+.muted{color:var(--mute)}
+.wm{font-family:var(--display);color:var(--acc);font-size:26px;line-height:1;letter-spacing:.5px}
+h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:.6px}
+.top{flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:calc(10px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-left,0px)) 10px;border-bottom:1px solid var(--line)}
+.top .rt{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;color:var(--mute)}
+.sp{margin-left:auto}
+.btn{min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);cursor:pointer;font-weight:700;font-size:15px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink);gap:8px}
+.btn.y{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}
+.btn.sm{min-height:38px;padding:0 12px;font-size:14px}
+.btn.bad{color:var(--warn)}
+.btn:disabled{opacity:.45;cursor:default}
+.chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-size:13px;font-weight:600;min-height:34px;background:none;color:var(--ink)}
+.chip i{width:9px;height:9px;border-radius:50%;background:var(--mute);display:block}.chip.ok i{background:var(--ok)}
+.tabs{display:none;flex:none;gap:6px;padding:8px max(14px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line)}
+.tabs button{flex:1;min-height:40px;border-radius:99px;border:1px solid var(--line);background:none;font-weight:700;cursor:pointer}
+.tabs button[aria-pressed="true"]{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}
+.layout{flex:1;min-height:0;display:grid;grid-template-columns:minmax(380px,500px) 1fr}
+#list{overflow-y:auto;padding:12px max(14px,env(safe-area-inset-left,0px)) 40px;display:flex;flex-direction:column;gap:14px}
+#mapwrap{position:relative;min-height:0;border-left:1px solid var(--line)}
+#map{position:absolute;inset:0;background:#0b0b0b}
+.leaflet-container{background:#0b0b0b;font-family:var(--body)}
+.banner{position:absolute;left:12px;right:12px;top:12px;z-index:900;background:var(--acc);color:var(--on-acc);font-weight:700;border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:center;justify-content:space-between}
+.banner button{background:#000;color:#fff;border:0;border-radius:8px;min-height:34px;padding:0 10px;font-weight:700;cursor:pointer}
+@media (max-width:899px){
+  .tabs{display:flex}.layout{grid-template-columns:1fr}
+  #mapwrap{border-left:0}
+  body[data-tab="mapa"] #list{display:none}body[data-tab="pedidos"] #mapwrap{display:none}
+}
+.sec{display:flex;flex-direction:column;gap:10px}
+.sec h3{margin:0;font-family:var(--display);font-weight:400;font-size:20px;letter-spacing:.6px;display:flex;gap:8px;align-items:baseline}
+.sec h3 small{font-family:var(--body);font-size:14px;color:var(--mute)}
+.empty{color:var(--mute);font-size:14px;margin:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.card.sel{border-color:var(--acc)}
+.ct{display:flex;gap:12px;align-items:flex-start}
+.num{flex:none;width:46px;height:46px;border-radius:12px;background:var(--panel2);display:grid;place-items:center;font-family:var(--display);font-size:24px;line-height:1}
+.cb{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.cn{font-weight:700;font-size:18px;overflow-wrap:anywhere}
+.cd{font-size:16px;overflow-wrap:anywhere}
+.cm{font-size:14px;color:var(--mute);display:flex;flex-wrap:wrap;gap:2px 12px}
+.tag{flex:none;font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding:4px 9px;border-radius:99px;border:1px solid var(--line);white-space:nowrap}
+.tag.cobrar{background:var(--warn);color:#000;border-color:var(--warn)}.tag.ok{color:var(--ok);border-color:var(--ok)}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.warn{color:var(--warn)}.okc{color:var(--ok)}
+/* modal */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;display:flex;align-items:flex-end;justify-content:center}
+.md{background:var(--panel);border:1px solid var(--line);border-radius:22px 22px 0 0;width:min(560px,100%);max-height:92dvh;overflow-y:auto;padding:16px max(18px,env(safe-area-inset-left,0px)) calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:12px}
+@media (min-width:700px){.ov{align-items:center}.md{border-radius:22px}}
+.md label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mute)}
+.md input,.md select,.md textarea{min-height:48px;border-radius:10px;border:1px solid var(--line);background:#000;padding:0 12px;font-size:16px;width:100%}
+.md textarea{padding:10px 12px;min-height:72px;resize:vertical}
+.md .g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.md .ck{flex-direction:row;align-items:center;gap:10px;font-size:15px;color:var(--ink)}
+.md .ck input{width:24px;min-height:24px;height:24px;accent-color:var(--acc)}
+.md .acts{display:flex;gap:10px}.md .acts .btn{flex:1}
+.md p{margin:0}
+.rw{display:grid;grid-template-columns:1fr 1.4fr auto;gap:8px;align-items:center}
+.rw .btn{min-height:44px}
+.chk{display:flex;flex-direction:column;gap:8px;max-height:36dvh;overflow-y:auto}
+.chk label{flex-direction:row;align-items:flex-start;gap:10px;font-size:15px;color:var(--ink);background:var(--panel2);border-radius:10px;padding:10px}
+.chk input{width:22px;min-height:22px;height:22px;accent-color:var(--acc);flex:none;margin-top:2px}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#fff;color:#000;border-radius:12px;padding:10px 14px;display:flex;gap:14px;align-items:center;font-weight:600;z-index:3000;max-width:92vw}
+.toast button{background:none;border:0;font-weight:800;text-decoration:underline;cursor:pointer;color:#000}
+/* marcadores */
+.mk{display:grid;place-items:center;border-radius:50%;font-family:var(--display);font-size:18px;border:3px solid #000;width:36px;height:36px;line-height:1}
+.mk.cocina{background:#8a8a8a;color:#000}.mk.listo{background:#fff;color:#000}.mk.camino{background:var(--acc);color:#000;box-shadow:0 0 0 2px var(--acc)}
+.mk-shop{width:34px;height:34px;border-radius:9px;background:#000;border:3px solid var(--acc);color:var(--acc);display:grid;place-items:center;font-family:var(--display);font-size:20px}
+.mk-rider{position:relative;width:44px;height:44px}
+.mk-rider .dot{position:absolute;inset:6px;border-radius:50%;background:var(--ok);border:3px solid #000;display:grid;place-items:center}
+.mk-rider svg{width:16px;height:16px}
+.mk-rider b{position:absolute;left:50%;top:-18px;transform:translateX(-50%);background:#000;color:#fff;font:700 12px var(--body);padding:2px 6px;border-radius:6px;white-space:nowrap}
+</style>
+</head>
+<body data-tab="pedidos">
+<div id="app"><div class="center"><p class="muted">Cargando…</p></div></div>
+<script src="config.js"></script>
+<script src="geo.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script type="module">
+import { ref, col, getDoc, setDoc, updateDoc, onSnapshot, query, where, keyOf, trackUrl, login, onUser, logout } from './fb.js';
+const $app = document.getElementById('app');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = n => '$ ' + Math.round(n || 0).toLocaleString('es-AR');
+const mins = t => Math.max(0, Math.round((Date.now() - t) / 60000));
+const dayKey = t => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const startOfDay = back => { const d = new Date(Date.now() - back * 86400000); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const TILES = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', ATTR = '© OpenStreetMap · © CARTO';
+const BASE_FALLBACK = { lat: -34.6045, lng: -58.4895 };
+
+let EMAIL = '', LOC = null, pedidos = [], posiciones = {}, placing = null, selId = null, started = false;
+const isOwner = () => LOC && LOC.owner === EMAIL;
+const center = html => { $app.innerHTML = '<div class="center">' + html + '</div>'; };
+
+/* ── entrada ── */
+function loginScreen() {
+  center('<div class="wm" style="font-size:40px">Shivo\'s Reparto</div><p class="muted">Entrá con tu cuenta de Google.</p><button class="btn y" id="g" style="min-width:260px;min-height:56px">Entrar con Google</button>');
+  document.getElementById('g').onclick = login;
+}
+onUser(async user => {
+  if (started) return;
+  if (!user) return loginScreen();
+  EMAIL = (user.email || '').toLowerCase();
+  center('<p class="muted">Cargando…</p>');
+  try { const s = await getDoc(ref()); LOC = s.exists() ? s.data() : null; } catch (e) { console.error(e); LOC = null; }
+  if (!LOC) {
+    if (EMAIL === (window.REPARTO_OWNER || '').toLowerCase()) return setupScreen();
+    center('<h2>Sin acceso</h2><p class="muted">La cuenta ' + esc(EMAIL) + ' no tiene acceso a este local.</p><button class="btn" id="out">Salir</button>');
+    document.getElementById('out').onclick = logout; return;
+  }
+  if (!(LOC.staff || []).includes(EMAIL)) {
+    if (LOC.riders && LOC.riders[keyOf(EMAIL)]) return location.replace('repartidor.html' + location.search);
+    center('<h2>Sin acceso</h2><p class="muted">La cuenta ' + esc(EMAIL) + ' no tiene acceso a este local.</p><button class="btn" id="out">Salir</button>');
+    document.getElementById('out').onclick = logout; return;
+  }
+  start();
+});
+function setupScreen() {
+  center('<h2>Crear el local</h2><p class="muted">Primera vez: se crea el local con tu cuenta como dueño. Después agregás a Nacho y al resto del equipo en Ajustes.</p><button class="btn y" id="mk" style="min-width:260px;min-height:56px">Crear Shivo\'s</button><p class="muted" id="msg"></p>');
+  document.getElementById('mk').onclick = async () => {
+    const b = document.getElementById('mk'); b.disabled = true;
+    const g = await GEO.geocode('Tinogasta 3239').catch(() => null);
+    const d = { nombre: 'Shivo\'s', owner: EMAIL, staff: [EMAIL], riders: {}, tel: '11 3045-5484', color: '#F1BB00', dir: 'Tinogasta 3239, Villa del Parque', base: g ? { lat: g.lat, lng: g.lng } : BASE_FALLBACK, creado: Date.now() };
+    try { await setDoc(ref(), d); LOC = d; start(); } catch (e) { b.disabled = false; document.getElementById('msg').textContent = 'No se pudo crear: ' + (e.code || e.message); }
+  };
+}
+
+/* ── app ── */
+let map = null, markers = { ped: {}, rid: {}, shop: null }, fitted = false;
+function start() {
+  started = true;
+  if (LOC.color && /^#[0-9a-f]{6}$/i.test(LOC.color)) document.documentElement.style.setProperty('--acc', LOC.color);
+  $app.innerHTML = '<header class="top"><span class="wm">' + esc(LOC.nombre || 'Shivo\'s') + '</span><span class="rt">Reparto</span><span class="sp"></span>' +
+    '<span class="chip" id="riders"><i></i><span>Sin repartidores</span></span>' +
+    '<button class="btn y" id="nuevo">+ Nuevo pedido</button><button class="btn" id="aj">Ajustes</button><button class="btn" id="out">Salir</button></header>' +
+    '<div class="tabs" role="group" aria-label="Vista"><button type="button" data-tab="pedidos" aria-pressed="true">Pedidos</button><button type="button" data-tab="mapa" aria-pressed="false">Mapa</button></div>' +
+    '<div class="layout"><section id="list" aria-label="Pedidos"></section><section id="mapwrap" aria-label="Mapa"><div id="banner" class="banner" hidden></div><div id="map"></div></section></div>';
+  document.getElementById('nuevo').onclick = formPedido;
+  document.getElementById('aj').onclick = ajustes;
+  document.getElementById('out').onclick = logout;
+  document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+    document.body.dataset.tab = b.dataset.tab;
+    document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    if (b.dataset.tab === 'mapa' && map) setTimeout(() => map.invalidateSize(), 50);
+  });
+  document.getElementById('list').addEventListener('click', onList);
+  initMap();
+  onSnapshot(ref(), s => { if (s.exists()) { LOC = s.data(); drawRiders(); drawMap(); } });
+  onSnapshot(query(col('pedidos'), where('creado', '>=', startOfDay(1))), snap => { pedidos = []; snap.forEach(d => pedidos.push(d.data())); drawList(); drawMap(); }, err => toast('Sin conexión con la base: ' + err.code));
+  onSnapshot(col('pos'), snap => { posiciones = {}; snap.forEach(d => posiciones[d.id] = d.data()); drawRiders(); drawMap(); }, () => { });
+  setInterval(() => { drawList(); drawRiders(); }, 30000);
+}
+const activos = () => pedidos.filter(o => o.estado === 'cocina' || o.estado === 'listo' || o.estado === 'camino');
+const ridersOn = () => Object.entries(posiciones).filter(([, p]) => p.activo && Date.now() - p.t < 300000);
+function drawRiders() {
+  const el = document.getElementById('riders'); if (!el) return;
+  const on = ridersOn(), total = Object.keys(LOC.riders || {}).length;
+  el.className = 'chip' + (on.length ? ' ok' : '');
+  el.lastChild.textContent = on.length ? on.map(([, p]) => p.name).join(', ') + ' en ruta' : total ? 'Sin repartidores en ruta' : 'Sin repartidores cargados';
+}
+
+/* ── lista ── */
+function card(o) {
+  const cobrar = +o.cobrar || 0, sel = o.id === selId;
+  const rider = o.repartidor ? '<span>🛵 ' + esc(o.repartidor) + (o.llegoT && o.estado === 'camino' ? ' · <b class="okc">llegó</b>' : '') + '</span>' : '';
+  const link = o.linkEnviado ? '<span class="okc">Link enviado ✓</span>' : '<span class="warn">Link sin enviar</span>';
+  const geo = o.geo ? '' : '<span class="warn">Sin ubicar en el mapa</span>';
+  let acts = '';
+  if (o.estado === 'cocina') acts += '<button class="btn sm y" data-a="listo" data-id="' + o.id + '">Listo →</button>';
+  if (o.estado === 'listo') acts += '<button class="btn sm y" data-a="despachar" data-id="' + o.id + '">Despachar →</button>';
+  if (o.estado === 'camino') acts += '<button class="btn sm y" data-a="entregar" data-id="' + o.id + '">Entregado ✓</button>';
+  if (o.estado !== 'entregado' && o.estado !== 'cancelado') {
+    acts += '<button class="btn sm" data-a="link" data-id="' + o.id + '">' + (o.linkEnviado ? 'Reenviar link' : 'Enviar link') + '</button>';
+    if (!o.geo) acts += '<button class="btn sm" data-a="ubicar" data-id="' + o.id + '">Ubicar en mapa</button>';
+    acts += '<button class="btn sm bad" data-a="cancelar" data-id="' + o.id + '">Cancelar</button>';
+  }
+  return '<div class="card' + (sel ? ' sel' : '') + '" data-card="' + o.id + '"><div class="ct"><div class="num">' + o.num + '</div><div class="cb"><span class="cn">' + esc(o.nombre) + '</span>' +
+    '<span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' +
+    '<span class="cm"><span>' + esc(o.tel) + '</span><span>hace ' + mins(o.creado) + ' min</span>' + rider + '</span>' +
+    (o.nota ? '<span class="cm">» ' + esc(o.nota) + '</span>' : '') +
+    (o.estado !== 'entregado' && o.estado !== 'cancelado' ? '<span class="cm">' + link + geo + '</span>' : '') + '</div>' +
+    '<span class="tag ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></div>' +
+    (acts ? '<div class="row">' + acts + '</div>' : '') + '</div>';
+}
+function drawList() {
+  const el = document.getElementById('list'); if (!el) return;
+  const by = e => pedidos.filter(o => o.estado === e).sort((a, b) => a.creado - b.creado);
+  const sec = (t, l, empty, rev) => '<div class="sec"><h3>' + t + ' <small>' + l.length + '</small></h3>' + (l.length ? (rev ? l.slice().reverse() : l).map(card).join('') : '<p class="empty">' + empty + '</p>') + '</div>';
+  const hoy = dayKey(Date.now()), ent = by('entregado').filter(o => dayKey(o.entregaT || o.creado) === hoy);
+  const html = sec('Cocinando', by('cocina'), 'Sin pedidos en cocina.') + sec('Listos para despachar', by('listo'), 'Nada esperando repartidor.') +
+    sec('En camino', by('camino'), 'Nadie en la calle.') + sec('Entregados hoy', ent, 'Todavía no entregaste ninguno hoy.', true);
+  if (html === drawList.last) return;
+  const sc = el.scrollTop; el.innerHTML = html; el.scrollTop = sc; drawList.last = html;
+}
+function onList(ev) {
+  const b = ev.target.closest('[data-a]');
+  if (!b) { const c = ev.target.closest('[data-card]'); if (c) verEnMapa(c.dataset.card, false); return; }
+  const o = pedidos.find(x => x.id === b.dataset.id); if (!o) return;
+  const a = b.dataset.a;
+  if (a === 'listo') cambiar(o, 'listo');
+  if (a === 'despachar') despachar(o);
+  if (a === 'entregar') cambiar(o, 'entregado');
+  if (a === 'link') enviarLink(o);
+  if (a === 'ubicar') ubicar(o);
+  if (a === 'cancelar') confirmar('¿Cancelar el pedido #' + o.num + ' de ' + o.nombre + '?', 'Sí, cancelar', () => cambiar(o, 'cancelado'));
+}
+
+/* ── acciones ── */
+const TRACK_ESTADO = { cocina: 'preparando', listo: 'listo', camino: 'camino', entregado: 'entregado', cancelado: 'cancelado' };
+function cambiar(o, estado, extra = {}) {
+  const t = Date.now(), p = { estado, upd: t, ...extra };
+  if (estado === 'entregado') p.entregaT = t;
+  updateDoc(ref('pedidos', o.id), p).catch(e => toast('No se pudo guardar: ' + e.code));
+  if (o.track) updateDoc(ref('track', o.track), { estado: TRACK_ESTADO[estado], upd: t, ...(estado === 'entregado' || estado === 'cancelado' ? { antes: 0 } : {}) }).catch(() => { });
+}
+function waUrl(o) {
+  const msg = 'Hola ' + GEO.firstName(o.nombre) + '! Seguí tu pedido de ' + (LOC.nombre || 'Shivo\'s') + ' en vivo: ' + trackUrl(o.track);
+  return 'https://wa.me/' + GEO.waPhone(o.tel) + '?text=' + encodeURIComponent(msg);
+}
+function enviarLink(o) {
+  window.open(waUrl(o), '_blank');
+  updateDoc(ref('pedidos', o.id), { linkEnviado: Date.now() }).catch(() => { });
+  toast('Tocá enviar en WhatsApp');
+}
+function geocodificar(id, tok, dir) {
+  GEO.geocode(dir).then(g => {
+    if (!g) return toast('No pude ubicar «' + dir + '» en el mapa. Tocá «Ubicar en mapa» en el pedido.');
+    updateDoc(ref('pedidos', id), { geo: g }).catch(() => { });
+    updateDoc(ref('track', tok), { dest: { lat: g.lat, lng: g.lng } }).catch(() => { });
+  });
+}
+function crearPedido(f) {
+  const t = Date.now(), id = 'p' + t.toString(36) + Math.random().toString(36).slice(2, 5), tok = GEO.token(), hoy = dayKey(t);
+  const num = pedidos.filter(o => dayKey(o.creado) === hoy).reduce((m, o) => Math.max(m, o.num || 0), 0) + 1;
+  const o = { id, num, nombre: f.nombre, tel: f.tel, dir: f.dir, depto: f.depto, nota: f.nota, cobrar: f.cobrar, estado: 'cocina', track: tok, creado: t, upd: t, repartidor: '', repartidorEmail: '', linkEnviado: f.wa ? t : null };
+  setDoc(ref('pedidos', id), o).catch(e => toast('No se pudo guardar: ' + e.code));
+  setDoc(ref('track', tok), { tok, pedidoId: id, num, nombre: GEO.firstName(f.nombre), dir: f.dir + (f.depto ? ' · ' + f.depto : ''), estado: 'preparando', local: LOC.nombre || '', tel: LOC.tel || '', color: LOC.color || '', antes: 0, upd: t }).catch(() => { });
+  if (f.wa) window.open(waUrl(o), '_blank'); // síncrono dentro del toque, para que el navegador no lo bloquee
+  geocodificar(id, tok, f.dir);
+  toast('Pedido #' + num + ' cargado' + (f.wa ? ': tocá enviar en WhatsApp' : ''));
+}
+
+/* ── modales ── */
+function modal(html) {
+  closeModal();
+  const ov = document.createElement('div'); ov.className = 'ov'; ov.innerHTML = '<div class="md" role="dialog" aria-modal="true">' + html + '</div>';
+  ov.addEventListener('mousedown', e => { if (e.target === ov) closeModal(); });
+  document.body.appendChild(ov); return ov.firstChild;
+}
+function closeModal() { document.querySelectorAll('.ov').forEach(x => x.remove()); }
+function confirmar(texto, label, fn) {
+  const m = modal('<h2>' + esc(texto) + '</h2><div class="acts"><button class="btn" data-x>Volver</button><button class="btn y" data-ok>' + esc(label) + '</button></div>');
+  m.querySelector('[data-x]').onclick = closeModal; m.querySelector('[data-ok]').onclick = () => { closeModal(); fn(); };
+}
+function formPedido() {
+  const m = modal('<h2>Nuevo pedido</h2><form id="f" autocomplete="off" style="display:flex;flex-direction:column;gap:12px">' +
+    '<label>Nombre<input name="nombre" required></label><label>Teléfono (WhatsApp)<input name="tel" type="tel" inputmode="tel" required placeholder="11 5555-0101"></label>' +
+    '<label>Dirección<input name="dir" required placeholder="Calle y número"></label>' +
+    '<div class="g2"><label>Piso / depto<input name="depto"></label><label>Cobrar en la puerta ($)<input name="cobrar" inputmode="numeric" placeholder="0 = ya pagado"></label></div>' +
+    '<label>Nota para el repartidor<textarea name="nota" placeholder="Timbre, entre calles, etc."></textarea></label>' +
+    '<label class="ck"><input type="checkbox" name="wa" checked> Enviar el link de seguimiento por WhatsApp al guardar</label>' +
+    '<div class="acts"><button type="button" class="btn" data-x>Cancelar</button><button class="btn y">Cargar pedido</button></div></form>');
+  m.querySelector('[data-x]').onclick = closeModal;
+  m.querySelector('[name=nombre]').focus();
+  m.querySelector('#f').onsubmit = e => {
+    e.preventDefault();
+    const d = Object.fromEntries(new FormData(e.target)), t = s => String(s || '').trim();
+    if (!t(d.nombre) || !t(d.tel) || !t(d.dir)) return;
+    crearPedido({ nombre: t(d.nombre), tel: t(d.tel), dir: t(d.dir), depto: t(d.depto), nota: t(d.nota), cobrar: Math.max(0, parseInt(String(d.cobrar).replace(/\D/g, ''), 10) || 0), wa: !!d.wa });
+    closeModal();
+  };
+}
+function despachar(o0) {
+  const riders = Object.entries(LOC.riders || {});
+  const listos = pedidos.filter(o => o.estado === 'listo').sort((a, b) => a.creado - b.creado);
+  if (!riders.length) return modal('<h2>Faltan repartidores</h2><p class="muted">Cargá a Nacho en Ajustes, con su Gmail.</p><div class="acts"><button class="btn y" data-x>Entendido</button></div>').querySelector('[data-x]').onclick = closeModal;
+  const on = new Set(ridersOn().map(([k]) => k));
+  const m = modal('<h2>Despachar</h2><p class="muted">Elegí qué pedidos lleva (va en este orden) y quién:</p><div class="chk">' +
+    listos.map(o => '<label><input type="checkbox" value="' + o.id + '"' + (o.id === o0.id ? ' checked' : '') + '><span><b>#' + o.num + ' ' + esc(o.nombre) + '</b><br>' + esc(o.dir) + '</span></label>').join('') + '</div>' +
+    '<div class="row">' + riders.map(([k, n]) => '<button class="btn y" data-r="' + esc(k) + '">' + esc(n) + (on.has(k) ? ' · en ruta' : '') + '</button>').join('') + '</div>' +
+    '<div class="acts"><button class="btn" data-x>Cancelar</button></div>');
+  m.querySelector('[data-x]').onclick = closeModal;
+  m.querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
+    const ids = [...m.querySelectorAll('.chk input:checked')].map(x => x.value);
+    if (!ids.length) return toast('Elegí al menos un pedido');
+    const key = b.dataset.r, name = LOC.riders[key], email = key.replace(/,/g, '.'), t = Date.now();
+    const baseOrden = pedidos.filter(o => o.estado === 'camino' && o.repartidorEmail === email).length;
+    ids.forEach((id, i) => { const o = pedidos.find(x => x.id === id); if (o) { cambiar(o, 'camino', { repartidor: name, repartidorEmail: email, salio: t, orden: baseOrden + i }); if (o.track) updateDoc(ref('track', o.track), { repartidor: name, salio: t }).catch(() => { }); } });
+    closeModal(); toast('Despachado con ' + name);
+  });
+}
+function ajustes() {
+  const owner = isOwner(), riders = Object.entries(LOC.riders || {}).map(([k, n]) => ({ n, e: k.replace(/,/g, '.') })), staff = (LOC.staff || []).slice();
+  const dis = owner ? '' : ' disabled';
+  const row = (r, i) => '<div class="rw" data-r="' + i + '"><input value="' + esc(r.n) + '" data-f="n" placeholder="Nombre"' + dis + '><input value="' + esc(r.e) + '" data-f="e" placeholder="Gmail" type="email"' + dis + '><button type="button" class="btn sm" data-del="' + i + '"' + dis + '>Quitar</button></div>';
+  const m = modal('<h2>Ajustes</h2>' + (owner ? '' : '<p class="muted">Solo el dueño puede cambiar esto.</p>') +
+    '<label>Nombre del local<input id="s-n" value="' + esc(LOC.nombre) + '"' + dis + '></label>' +
+    '<div class="g2"><label>WhatsApp del local<input id="s-t" value="' + esc(LOC.tel) + '"' + dis + '></label><label>Color (hex)<input id="s-c" value="' + esc(LOC.color) + '"' + dis + '></label></div>' +
+    '<h2 style="font-size:20px">Repartidores</h2><div id="rl" style="display:flex;flex-direction:column;gap:8px">' + riders.map(row).join('') + '</div>' +
+    (owner ? '<button type="button" class="btn sm" id="ra">+ Agregar repartidor</button>' : '') +
+    '<p class="muted">Cada repartidor entra a <b>repartidor.html</b> con su Gmail.</p>' +
+    '<h2 style="font-size:20px">Equipo del local</h2><label>Gmails con acceso al panel (uno por línea)<textarea id="s-s" rows="3"' + dis + '>' + esc(staff.join('\n')) + '</textarea></label>' +
+    '<div class="acts"><button type="button" class="btn" data-x>Cerrar</button>' + (owner ? '<button type="button" class="btn y" id="sv">Guardar</button>' : '') + '</div>');
+  m.querySelector('[data-x]').onclick = closeModal;
+  if (!owner) return;
+  const rl = m.querySelector('#rl');
+  const sync = () => { riders.length = 0; rl.querySelectorAll('.rw').forEach(r => riders.push({ n: r.querySelector('[data-f=n]').value, e: r.querySelector('[data-f=e]').value })); };
+  const redraw = () => { rl.innerHTML = riders.map(row).join(''); rl.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { sync(); riders.splice(+b.dataset.del, 1); redraw(); }); };
+  redraw();
+  m.querySelector('#ra').onclick = () => { sync(); riders.push({ n: '', e: '' }); redraw(); rl.lastChild.querySelector('input').focus(); };
+  m.querySelector('#sv').onclick = () => {
+    sync();
+    const map = {}; riders.forEach(r => { const e = r.e.trim().toLowerCase(), n = r.n.trim(); if (e && n) map[keyOf(e)] = n; });
+    const st = [...new Set([LOC.owner, ...m.querySelector('#s-s').value.split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(x => /@/.test(x))])];
+    const col_ = m.querySelector('#s-c').value.trim();
+    updateDoc(ref(), { nombre: m.querySelector('#s-n').value.trim() || LOC.nombre, tel: m.querySelector('#s-t').value.trim(), color: /^#[0-9a-f]{6}$/i.test(col_) ? col_ : LOC.color, riders: map, staff: st })
+      .then(() => { closeModal(); toast('Guardado'); }).catch(e => toast('No se pudo guardar: ' + e.code));
+  };
+}
+let tt = 0;
+function toast(msg, label, fn) {
+  document.querySelectorAll('.toast').forEach(x => x.remove());
+  const d = document.createElement('div'); d.className = 'toast'; d.textContent = msg;
+  if (label) { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { fn(); d.remove(); }; d.appendChild(b); }
+  document.body.appendChild(d); clearTimeout(tt); tt = setTimeout(() => d.remove(), label ? 7000 : 3500);
+}
+
+/* ── mapa ── */
+const ARROW = '<svg viewBox="0 0 16 16"><path d="M8 1L14 14L8 11L2 14Z" fill="#000"/></svg>';
+const icon = (html, w) => L.divIcon({ html, className: '', iconSize: [w, w], iconAnchor: [w / 2, w / 2] });
+function initMap() {
+  if (!window.L) { document.getElementById('map').innerHTML = '<div class="center"><p class="muted">No se pudo cargar el mapa.</p></div>'; return; }
+  const b = (LOC && LOC.base) || BASE_FALLBACK;
+  map = L.map('map', { zoomControl: true }).setView([b.lat, b.lng], 14);
+  L.tileLayer(TILES, { subdomains: 'abcd', maxZoom: 19, attribution: ATTR }).addTo(map);
+  map.attributionControl.setPrefix(false);
+  map.on('click', e => { if (placing) fijarUbicacion(e.latlng); });
+}
+function drawMap() {
+  if (!map) return;
+  const b = LOC.base || BASE_FALLBACK;
+  if (!markers.shop) markers.shop = L.marker([b.lat, b.lng], { icon: icon('<div class="mk-shop">S</div>', 34), interactive: false, keyboard: false }).addTo(map);
+  const act = new Set(activos().filter(o => o.geo).map(o => o.id));
+  Object.keys(markers.ped).forEach(id => { if (!act.has(id)) { map.removeLayer(markers.ped[id].m); delete markers.ped[id]; } });
+  activos().filter(o => o.geo).forEach(o => {
+    const k = o.estado + '|' + o.num, cur = markers.ped[o.id];
+    if (cur && cur.k === k) { cur.m.setLatLng([o.geo.lat, o.geo.lng]); return; }
+    if (cur) map.removeLayer(cur.m);
+    const m = L.marker([o.geo.lat, o.geo.lng], { icon: icon('<div class="mk ' + o.estado + '">' + o.num + '</div>', 36), keyboard: false, title: o.nombre + ' · ' + o.dir }).addTo(map);
+    m.on('click', () => { selId = o.id; drawList.last = null; drawList(); const c = document.querySelector('[data-card="' + o.id + '"]'); c && c.scrollIntoView({ block: 'center', behavior: 'smooth' }); });
+    markers.ped[o.id] = { m, k };
+  });
+  const on = new Map(ridersOn());
+  Object.keys(markers.rid).forEach(k => { if (!on.has(k)) { map.removeLayer(markers.rid[k]); delete markers.rid[k]; } });
+  on.forEach((p, k) => {
+    if (!isFinite(p.lat)) return;
+    let m = markers.rid[k];
+    const html = '<div class="mk-rider"><b>' + esc(p.name) + '</b><div class="dot" style="transform:rotate(' + (p.hdg || 0) + 'deg)">' + ARROW + '</div></div>';
+    if (!m) { m = markers.rid[k] = L.marker([p.lat, p.lng], { icon: icon(html, 44), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map); m._h = html; }
+    else { m.setLatLng([p.lat, p.lng]); if (m._h !== html) { m.setIcon(icon(html, 44)); m._h = html; } }
+  });
+  if (!fitted) {
+    const pts = [[b.lat, b.lng], ...activos().filter(o => o.geo).map(o => [o.geo.lat, o.geo.lng])];
+    if (pts.length > 1) { map.fitBounds(pts, { padding: [50, 50], maxZoom: 16 }); fitted = true; }
+  }
+}
+function verEnMapa(id, abrirTab) {
+  selId = id; drawList.last = null; drawList();
+  const o = pedidos.find(x => x.id === id);
+  if (abrirTab) document.querySelector('.tabs [data-tab=mapa]').click();
+  if (o && o.geo && map) map.flyTo([o.geo.lat, o.geo.lng], Math.max(map.getZoom(), 16));
+}
+function ubicar(o) {
+  placing = o.id;
+  document.querySelector('.tabs [data-tab=mapa]').click();
+  const bn = document.getElementById('banner'); bn.hidden = false;
+  bn.innerHTML = '<span>Tocá el mapa donde vive ' + esc(o.nombre) + '</span><button type="button">Cancelar</button>';
+  bn.querySelector('button').onclick = () => { placing = null; bn.hidden = true; };
+  map && o.dir && map.getContainer().style.setProperty('cursor', 'crosshair');
+}
+function fijarUbicacion(ll) {
+  const o = pedidos.find(x => x.id === placing); placing = null;
+  document.getElementById('banner').hidden = true; map.getContainer().style.removeProperty('cursor');
+  if (!o) return;
+  const g = { lat: ll.lat, lng: ll.lng, src: 'manual' };
+  updateDoc(ref('pedidos', o.id), { geo: g, upd: Date.now() }).catch(e => toast('No se pudo guardar: ' + e.code));
+  if (o.track) updateDoc(ref('track', o.track), { dest: { lat: g.lat, lng: g.lng } }).catch(() => { });
+  toast('Ubicación guardada');
+}
+</script>
+</body>
+</html>
