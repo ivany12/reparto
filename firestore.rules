@@ -40,12 +40,17 @@ service cloud.firestore {
 
       // Pedidos: el equipo todo; el repartidor lee y actualiza solo los que tiene asignados.
       match /pedidos/{p} {
-        allow read: if isStaff(l) || (isRider(l) && resource.data.repartidorEmail == em());
+        // El repartidor ve los pedidos listos para salir y los que él lleva.
+        allow read: if isStaff(l) || (isRider(l) && (resource.data.estado == 'listo' || resource.data.repartidorEmail == em()));
         allow create, delete: if isStaff(l);
         allow update: if isStaff(l)
           || (isRider(l) && resource.data.repartidorEmail == em()
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado','llegoT','entregaT','geo','orden','upd'])
-              && request.resource.data.estado in ['camino','entregado']);
+              && request.resource.data.estado in ['camino','entregado'])
+          // O toma un pedido que está listo y sale con él.
+          || (isRider(l) && resource.data.estado == 'listo'
+              && request.resource.data.estado == 'camino' && request.resource.data.repartidorEmail == em()
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado','repartidor','repartidorEmail','salio','orden','upd']));
       }
 
       // Seguimiento público: cualquiera con el link (token imposible de adivinar) lo lee; listar no.
@@ -54,7 +59,7 @@ service cloud.firestore {
         allow list: if isStaff(l);
         allow create, delete: if isStaff(l);
         allow update: if isStaff(l)
-          || (isRider(l) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['moto','antes','etaMin','estado','repartidor','dest','upd']));
+          || (isRider(l) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['moto','antes','etaMin','estado','repartidor','salio','dest','upd']));
       }
 
       // Posición en vivo de cada repartidor.

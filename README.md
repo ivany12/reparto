@@ -17,7 +17,7 @@ Sistema propio de delivery: panel del local, app del repartidor y página de seg
 5. Nacho abre `repartidor.html` con su Gmail y deja la pantalla prendida mientras reparte.
 
 ## Flujo
-Nuevo pedido → (se abre WhatsApp con el link, enviado desde el celu/PC del local) → Listo → Despachar con Nacho → él marca Llegué / Entregado.
+Nuevo pedido (se puede editar mientras está en Cocinando o Listo) → el link se manda cuando quieras con «Enviar link» (WhatsApp desde el celu/PC del local) → Listo → sale en camino: lo despacha el local, o Nacho elige los pedidos listos en su app y toca «Salir» → Llegué / Entregado.
 
 ## Datos (`reparto/shivos`)
 `pedidos/{id}` privados · `track/{token}` público solo por token · `pos/{mail}` ubicación del repartidor.

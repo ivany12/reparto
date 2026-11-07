@@ -17,7 +17,7 @@ button{font:inherit;color:inherit}
 :focus-visible{outline:3px solid var(--acc);outline-offset:2px}
 #app{height:100%;display:flex;flex-direction:column;max-width:520px;margin:0 auto}
 .rh{flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:calc(12px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-left,0px)) 8px}
-.wm{font-family:var(--display);color:var(--acc);font-size:26px;line-height:1;letter-spacing:.5px}
+.wm{font-family:var(--display);color:var(--acc);font-size:26px;line-height:1;letter-spacing:.5px;text-transform:uppercase}
 .rt{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;color:var(--mute)}
 .chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-size:13px;font-weight:600;background:none;cursor:pointer;min-height:34px}
 .chip i{width:9px;height:9px;border-radius:50%;background:var(--mute);display:block}
@@ -37,6 +37,9 @@ button{font:inherit;color:inherit}
 .pay{flex:none;font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding:4px 9px;border-radius:99px;border:1px solid var(--line);white-space:nowrap}
 .pay.cobrar{background:var(--warn);color:#000;border-color:var(--warn)}.pay.ok{color:var(--ok);border-color:var(--ok)}
 .row{display:flex;gap:8px;flex-wrap:wrap}
+.pick{flex-direction:row;gap:12px;align-items:flex-start;cursor:pointer}
+.pick input{width:26px;height:26px;margin-top:2px;accent-color:var(--acc);flex:none}
+h3{margin:6px 0 0;font-family:var(--display);font-weight:400;font-size:20px;letter-spacing:.6px}
 .btn{min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);cursor:pointer;font-weight:700;font-size:15px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)}
 .btn.y{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}
 .act{flex:none;padding:12px max(16px,env(safe-area-inset-left,0px)) calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line)}
@@ -61,7 +64,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const money = n => '$ ' + Math.round(n || 0).toLocaleString('es-AR');
 const ls = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { } } };
 
-let EMAIL = '', ME = '', LOC = null, orders = [], order = [], unsub = null;
+let EMAIL = '', ME = '', LOC = null, orders = [], listos = [], order = [], unsub = [];
+const quitados = new Set(); // listos que Nacho destildó
 let pos = null, gps = 'idle', watchId = null, lastSent = 0, lock = null;
 const screen = html => { render.last = null; $app.innerHTML = html; };
 const center = html => screen('<div class="center">' + html + '</div>');
@@ -91,11 +95,20 @@ onUser(async user => {
 
 /* ── pedidos ── */
 function watchOrders() {
-  unsub && unsub();
-  unsub = onSnapshot(query(col('pedidos'), where('repartidorEmail', '==', EMAIL), where('estado', '==', 'camino')), snap => {
+  unsub.forEach(u => u()); unsub = [];
+  const fail = err => { console.error(err); center('<h2>Sin conexión con el local</h2><p class="muted">' + esc(err.code) + '</p><button class="btn" onclick="location.reload()">Reintentar</button>'); };
+  // En camino con este repartidor.
+  unsub.push(onSnapshot(query(col('pedidos'), where('repartidorEmail', '==', EMAIL), where('estado', '==', 'camino')), snap => {
     orders = []; snap.forEach(d => orders.push(d.data()));
     sync();
-  }, err => { console.error(err); center('<h2>Sin conexión con el local</h2><p class="muted">' + esc(err.code) + '</p><button class="btn" onclick="location.reload()">Reintentar</button>'); });
+  }, fail));
+  // Listos para salir (los ve cualquier repartidor del local).
+  unsub.push(onSnapshot(query(col('pedidos'), where('estado', '==', 'listo')), snap => {
+    listos = []; snap.forEach(d => listos.push(d.data()));
+    listos.sort((a, b) => a.creado - b.creado);
+    [...quitados].forEach(id => { if (!listos.some(o => o.id === id)) quitados.delete(id); });
+    render();
+  }, fail));
 }
 function stops() {
   const rank = id => { const i = order.indexOf(id); return i < 0 ? 1e9 : i; };
@@ -186,6 +199,18 @@ function entregado(o) {
   });
   sync();
 }
+function salir() {
+  const ids = listos.filter(o => !quitados.has(o.id));
+  if (!ids.length) return;
+  const t = Date.now(), base = orders.length;
+  ids.forEach((o, i) => {
+    updateDoc(ref('pedidos', o.id), { estado: 'camino', repartidor: ME, repartidorEmail: EMAIL, salio: t, orden: base + i, upd: t }).catch(e => toast('No se pudo guardar: ' + e.code));
+    if (o.track) updateDoc(ref('track', o.track), { estado: 'camino', repartidor: ME, salio: t, upd: t }).catch(() => { });
+  });
+  listos = listos.filter(o => !ids.includes(o)); // enseguida llegan por la otra consulta como "en camino"
+  toast('Saliste con ' + ids.length + (ids.length > 1 ? ' pedidos' : ' pedido'));
+  render();
+}
 function primero(o) { order = [o.id, ...stops().map(x => x.id).filter(id => id !== o.id)]; ls.set('rep_order', JSON.stringify(order)); sync(); }
 let tt = 0;
 function toast(msg, label, fn) {
@@ -203,8 +228,17 @@ function render() {
   const head = '<header class="rh"><span class="wm">' + esc(LOC.nombre || 'Shivo\'s') + '</span><span class="rt">Reparto</span><span class="sp"></span>' +
     '<span class="chip ' + gpsChip[0] + '"><i></i>' + gpsChip[1] + '</span><button class="chip" id="who" aria-label="Salir">' + esc(ME) + '</button></header>';
   let body, act = '';
-  if (!s.length) {
-    body = '<div class="center"><h2>Sin pedidos en camino</h2><p class="muted">Cuando el local te despache un pedido, aparece acá y se prende el GPS solo.</p></div>';
+  const chosen = listos.filter(o => !quitados.has(o.id));
+  const listosHtml = listos.length ? '<h3>Listos para salir</h3>' + listos.map(o => {
+    const cobrar = +o.cobrar || 0;
+    return '<label class="card pick"><input type="checkbox" data-pick="' + o.id + '"' + (quitados.has(o.id) ? '' : ' checked') + '><span class="cb"><span class="cn">#' + o.num + ' ' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' + (o.nota ? '<span class="cm">' + esc(o.nota) + '</span>' : '') + '</span>' +
+      '<span class="pay ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></label>';
+  }).join('') + (s.length ? '<button class="btn y" id="salir2"' + (chosen.length ? '' : ' disabled') + '>Sumar al recorrido (' + chosen.length + ')</button>' : '') : '';
+  if (!s.length && !listos.length) {
+    body = '<div class="center"><h2>Sin pedidos para repartir</h2><p class="muted">Cuando un pedido esté listo en el local aparece acá. Elegís cuáles llevás y tocás «Salir». El GPS se prende solo.</p></div>';
+  } else if (!s.length) {
+    body = '<div class="scroll">' + listosHtml + '</div>';
+    act = '<div class="act"><button class="go" id="salir"' + (chosen.length ? '' : ' disabled') + '>Salir con ' + chosen.length + (chosen.length === 1 ? ' pedido' : ' pedidos') + '</button></div>';
   } else {
     const warn = gps === 'denied' ? '<div class="banner">Activá la ubicación de este navegador para que el cliente vea la moto: Ajustes del celu, Safari o Chrome, Ubicación, Permitir.</div>'
       : gps === 'ok' && !lock ? '<div class="banner">Dejá esta pantalla abierta y prendida mientras repartís. Si cambiás de app o apagás la pantalla, el cliente deja de ver la moto.</div>' : '';
@@ -214,7 +248,7 @@ function render() {
         '<span class="cm"><span>Pedido #' + o.num + '</span>' + (o.nota ? '<span>' + esc(o.nota) + '</span>' : '') + '</span></div>' +
         '<span class="pay ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></div>' +
         '<div class="row">' + (o.tel ? '<a class="btn" href="tel:' + esc(String(o.tel).replace(/[^\d+]/g, '')) + '">Llamar</a>' : '') + (!on ? '<button class="btn" data-first="' + o.id + '">Ir primero</button>' : '') + '</div></div>';
-    }).join('') + '</div>';
+    }).join('') + listosHtml + '</div>';
     const got = !!cur.llegoT;
     act = '<div class="act"><button class="go ' + (got ? 'ok' : '') + '" id="go">' + (got ? 'Entregado ✓' : 'Llegué a ' + esc(cur.nombre || 'destino')) + '</button></div>';
   }
@@ -223,6 +257,8 @@ function render() {
   $app.innerHTML = html; render.last = html;
   const w = document.getElementById('who'); if (w) w.onclick = logout;
   document.querySelectorAll('[data-first]').forEach(b => b.onclick = () => primero(orders.find(x => x.id === b.dataset.first)));
+  document.querySelectorAll('[data-pick]').forEach(c => c.onchange = () => { c.checked ? quitados.delete(c.dataset.pick) : quitados.add(c.dataset.pick); render(); });
+  ['salir', 'salir2'].forEach(id => { const b = document.getElementById(id); if (b) b.onclick = salir; });
   const g = document.getElementById('go'); if (g) g.onclick = () => { const o = stops()[0]; o.llegoT ? entregado(o) : llego(o); };
 }
 setInterval(() => { if (ME) render(); }, 15000);

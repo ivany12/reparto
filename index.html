@@ -20,7 +20,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 #app{height:100%;display:flex;flex-direction:column}
 .center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
 .muted{color:var(--mute)}
-.wm{font-family:var(--display);color:var(--acc);font-size:26px;line-height:1;letter-spacing:.5px}
+.wm{font-family:var(--display);color:var(--acc);font-size:26px;line-height:1;letter-spacing:.5px;text-transform:uppercase}
 h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:.6px}
 .top{flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:calc(10px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-left,0px)) 10px;border-bottom:1px solid var(--line)}
 .top .rt{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;color:var(--mute)}
@@ -102,7 +102,7 @@ h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spa
 <script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
 <script src="map.js"></script>
 <script type="module">
-import { ref, col, getDoc, setDoc, updateDoc, onSnapshot, query, where, keyOf, trackUrl, login, onUser, logout } from './fb.js';
+import { ref, col, getDoc, setDoc, updateDoc, onSnapshot, query, where, deleteField, keyOf, trackUrl, login, onUser, logout } from './fb.js';
 const $app = document.getElementById('app');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = n => '$ ' + Math.round(n || 0).toLocaleString('es-AR');
@@ -143,13 +143,13 @@ function setupScreen() {
   document.getElementById('mk').onclick = async () => {
     const b = document.getElementById('mk'); b.disabled = true;
     const g = await GEO.geocode('Tinogasta 3239').catch(() => null);
-    const d = { nombre: 'Shivo\'s', owner: EMAIL, staff: [EMAIL], riders: {}, tel: '11 3045-5484', color: '#F1BB00', dir: 'Tinogasta 3239, Villa del Parque', base: g ? { lat: g.lat, lng: g.lng } : BASE_FALLBACK, creado: Date.now() };
+    const d = { nombre: 'Shivo\'s', owner: EMAIL, staff: [EMAIL], riders: {}, tel: '11 3045-5484', color: '#F1BB00', dir: 'Tinogasta 3239, Villa del Parque', base: g ? { lat: g.lat, lng: g.lng, src: g.src } : BASE_FALLBACK, creado: Date.now() };
     try { await setDoc(ref(), d); LOC = d; start(); } catch (e) { b.disabled = false; document.getElementById('msg').textContent = 'No se pudo crear: ' + (e.code || e.message); }
   };
 }
 
 /* ── app ── */
-let map = null, markers = { ped: {}, rid: {}, shop: null }, fitted = false;
+let map = null, markers = { ped: {}, rid: {}, shop: null }, lastBase = '';
 function start() {
   started = true;
   if (LOC.color && /^#[0-9a-f]{6}$/i.test(LOC.color)) document.documentElement.style.setProperty('--acc', LOC.color);
@@ -157,9 +157,10 @@ function start() {
     '<span class="chip" id="riders"><i></i><span>Sin repartidores</span></span>' +
     '<button class="btn y" id="nuevo">+ Nuevo pedido</button><button class="btn" id="aj">Ajustes</button><button class="btn" id="out">Salir</button></header>' +
     '<div class="tabs" role="group" aria-label="Vista"><button type="button" data-tab="pedidos" aria-pressed="true">Pedidos</button><button type="button" data-tab="mapa" aria-pressed="false">Mapa</button></div>' +
-    '<div class="layout"><section id="list" aria-label="Pedidos"></section><section id="mapwrap" aria-label="Mapa"><div id="banner" class="banner" hidden></div><div id="map"></div><button type="button" class="btn sm" id="recentrar" style="position:absolute;left:12px;bottom:28px;z-index:900">Centrar en el local</button></section></div>';
-  document.getElementById('nuevo').onclick = formPedido;
-  document.getElementById('recentrar').onclick = () => { const b = (LOC && LOC.base) || BASE_FALLBACK; map && map.flyTo([b.lat, b.lng], 15); };
+    '<div class="layout"><section id="list" aria-label="Pedidos"></section><section id="mapwrap" aria-label="Mapa"><div id="banner" class="banner" hidden></div><div id="map"></div><div style="position:absolute;left:12px;bottom:28px;z-index:900;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sm" id="recentrar">Centrar en el local</button><button type="button" class="btn sm" id="vertodos">Ver todos</button></div></section></div>';
+  document.getElementById('nuevo').onclick = () => formPedido();
+  document.getElementById('recentrar').onclick = () => { const b = (LOC && LOC.base) || BASE_FALLBACK; map && map.flyTo([b.lat, b.lng], 16); };
+  document.getElementById('vertodos').onclick = verTodos;
   document.getElementById('aj').onclick = ajustes;
   document.getElementById('out').onclick = logout;
   document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
@@ -169,6 +170,9 @@ function start() {
   });
   document.getElementById('list').addEventListener('click', onList);
   initMap();
+  if (isOwner() && !(LOC.base && LOC.base.src)) {
+    GEO.geocode(LOC.dir || 'Tinogasta 3239, Villa del Parque').then(g => { if (g) updateDoc(ref(), { base: { lat: g.lat, lng: g.lng, src: g.src } }).catch(() => { }); });
+  }
   onSnapshot(ref(), s => { if (s.exists()) { LOC = s.data(); drawRiders(); drawMap(); } });
   onSnapshot(query(col('pedidos'), where('creado', '>=', startOfDay(1))), snap => { pedidos = []; snap.forEach(d => pedidos.push(d.data())); drawList(); drawMap(); }, err => toast('Sin conexión con la base: ' + err.code));
   onSnapshot(col('pos'), snap => { posiciones = {}; snap.forEach(d => posiciones[d.id] = d.data()); drawRiders(); drawMap(); }, () => { });
@@ -193,6 +197,7 @@ function card(o) {
   if (o.estado === 'cocina') acts += '<button class="btn sm y" data-a="listo" data-id="' + o.id + '">Listo →</button>';
   if (o.estado === 'listo') acts += '<button class="btn sm y" data-a="despachar" data-id="' + o.id + '">Despachar →</button>';
   if (o.estado === 'camino') acts += '<button class="btn sm y" data-a="entregar" data-id="' + o.id + '">Entregado ✓</button>';
+  if (o.estado === 'cocina' || o.estado === 'listo') acts += '<button class="btn sm" data-a="editar" data-id="' + o.id + '">Editar</button>';
   if (o.estado !== 'entregado' && o.estado !== 'cancelado') {
     acts += '<button class="btn sm" data-a="link" data-id="' + o.id + '">' + (o.linkEnviado ? 'Reenviar link' : 'Enviar link') + '</button>';
     if (!o.geo) acts += '<button class="btn sm" data-a="ubicar" data-id="' + o.id + '">Ubicar en mapa</button>';
@@ -224,6 +229,7 @@ function onList(ev) {
   if (a === 'listo') cambiar(o, 'listo');
   if (a === 'despachar') despachar(o);
   if (a === 'entregar') cambiar(o, 'entregado');
+  if (a === 'editar') formPedido(o);
   if (a === 'link') enviarLink(o);
   if (a === 'ubicar') ubicar(o);
   if (a === 'cancelar') confirmar('¿Cancelar el pedido #' + o.num + ' de ' + o.nombre + '?', 'Sí, cancelar', () => cambiar(o, 'cancelado'));
@@ -238,7 +244,7 @@ function cambiar(o, estado, extra = {}) {
   if (o.track) updateDoc(ref('track', o.track), { estado: TRACK_ESTADO[estado], upd: t, ...(estado === 'entregado' || estado === 'cancelado' ? { antes: 0 } : {}) }).catch(() => { });
 }
 function waUrl(o) {
-  const msg = 'Hola ' + GEO.firstName(o.nombre) + '! Seguí tu pedido de ' + (LOC.nombre || 'Shivo\'s') + ' en vivo: ' + trackUrl(o.track);
+  const msg = 'Hola ' + GEO.firstName(o.nombre) + '! Seguí tu pedido de ' + (LOC.nombre || 'Shivo\'s').toUpperCase() + ' en vivo: ' + trackUrl(o.track);
   return 'https://wa.me/' + GEO.waPhone(o.tel) + '?text=' + encodeURIComponent(msg);
 }
 function enviarLink(o) {
@@ -264,6 +270,20 @@ function crearPedido(f) {
   toast('Pedido #' + num + ' cargado' + (f.wa ? ': tocá enviar en WhatsApp' : ''));
 }
 
+function editarPedido(o, f) {
+  const t = Date.now(), cambioDir = f.dir !== o.dir;
+  const p = { nombre: f.nombre, tel: f.tel, dir: f.dir, depto: f.depto, nota: f.nota, cobrar: f.cobrar, upd: t };
+  if (cambioDir) p.geo = deleteField();
+  updateDoc(ref('pedidos', o.id), p).catch(e => toast('No se pudo guardar: ' + e.code));
+  if (o.track) {
+    const q = { nombre: GEO.firstName(f.nombre), dir: f.dir + (f.depto ? ' · ' + f.depto : ''), upd: t };
+    if (cambioDir) q.dest = deleteField();
+    updateDoc(ref('track', o.track), q).catch(() => { });
+  }
+  if (cambioDir) geocodificar(o.id, o.track, f.dir);
+  toast('Pedido #' + o.num + ' actualizado' + (o.linkEnviado && f.tel !== o.tel ? '. Cambió el teléfono: reenviá el link' : ''));
+}
+
 /* ── modales ── */
 function modal(html) {
   closeModal();
@@ -276,21 +296,23 @@ function confirmar(texto, label, fn) {
   const m = modal('<h2>' + esc(texto) + '</h2><div class="acts"><button class="btn" data-x>Volver</button><button class="btn y" data-ok>' + esc(label) + '</button></div>');
   m.querySelector('[data-x]').onclick = closeModal; m.querySelector('[data-ok]').onclick = () => { closeModal(); fn(); };
 }
-function formPedido() {
-  const m = modal('<h2>Nuevo pedido</h2><form id="f" autocomplete="off" style="display:flex;flex-direction:column;gap:12px">' +
+function formPedido(ed) {
+  const m = modal('<h2>' + (ed ? 'Editar pedido #' + ed.num : 'Nuevo pedido') + '</h2><form id="f" autocomplete="off" style="display:flex;flex-direction:column;gap:12px">' +
     '<label>Nombre<input name="nombre" required></label><label>Teléfono (WhatsApp)<input name="tel" type="tel" inputmode="tel" required placeholder="11 5555-0101"></label>' +
     '<label>Dirección<input name="dir" required placeholder="Calle y número"></label>' +
     '<div class="g2"><label>Piso / depto<input name="depto"></label><label>Cobrar en la puerta ($)<input name="cobrar" inputmode="numeric" placeholder="0 = ya pagado"></label></div>' +
     '<label>Nota para el repartidor<textarea name="nota" placeholder="Timbre, entre calles, etc."></textarea></label>' +
-    '<label class="ck"><input type="checkbox" name="wa"> Enviar el link por WhatsApp ahora (si no, lo mandás después con «Enviar link»)</label>' +
-    '<div class="acts"><button type="button" class="btn" data-x>Cancelar</button><button class="btn y">Cargar pedido</button></div></form>');
+    (ed ? '' : '<label class="ck"><input type="checkbox" name="wa"> Enviar el link por WhatsApp ahora (si no, lo mandás después con «Enviar link»)</label>') +
+    '<div class="acts"><button type="button" class="btn" data-x>Cancelar</button><button class="btn y">' + (ed ? 'Guardar cambios' : 'Cargar pedido') + '</button></div></form>');
   m.querySelector('[data-x]').onclick = closeModal;
+  if (ed) { const f = m.querySelector('#f'); f.nombre.value = ed.nombre || ''; f.tel.value = ed.tel || ''; f.dir.value = ed.dir || ''; f.depto.value = ed.depto || ''; f.cobrar.value = ed.cobrar || ''; f.nota.value = ed.nota || ''; }
   m.querySelector('[name=nombre]').focus();
   m.querySelector('#f').onsubmit = e => {
     e.preventDefault();
     const d = Object.fromEntries(new FormData(e.target)), t = s => String(s || '').trim();
     if (!t(d.nombre) || !t(d.tel) || !t(d.dir)) return;
-    crearPedido({ nombre: t(d.nombre), tel: t(d.tel), dir: t(d.dir), depto: t(d.depto), nota: t(d.nota), cobrar: Math.max(0, parseInt(String(d.cobrar).replace(/\D/g, ''), 10) || 0), wa: !!d.wa });
+    const f = { nombre: t(d.nombre), tel: t(d.tel), dir: t(d.dir), depto: t(d.depto), nota: t(d.nota), cobrar: Math.max(0, parseInt(String(d.cobrar).replace(/\D/g, ''), 10) || 0), wa: !!d.wa };
+    if (ed) editarPedido(ed, f); else crearPedido(f);
     closeModal();
   };
 }
@@ -320,6 +342,7 @@ function ajustes() {
   const m = modal('<h2>Ajustes</h2>' + (owner ? '' : '<p class="muted">Solo el dueño puede cambiar esto.</p>') +
     '<label>Nombre del local<input id="s-n" value="' + esc(LOC.nombre) + '"' + dis + '></label>' +
     '<div class="g2"><label>WhatsApp del local<input id="s-t" value="' + esc(LOC.tel) + '"' + dis + '></label><label>Color (hex)<input id="s-c" value="' + esc(LOC.color) + '"' + dis + '></label></div>' +
+    (owner ? '<button type="button" class="btn" id="mb">Marcar el local en el mapa</button>' : '') +
     '<h2 style="font-size:20px">Repartidores</h2><div id="rl" style="display:flex;flex-direction:column;gap:8px">' + riders.map(row).join('') + '</div>' +
     (owner ? '<button type="button" class="btn sm" id="ra">+ Agregar repartidor</button>' : '') +
     '<p class="muted">Cada repartidor entra a <b>repartidor.html</b> con su Gmail.</p>' +
@@ -327,6 +350,7 @@ function ajustes() {
     '<div class="acts"><button type="button" class="btn" data-x>Cerrar</button>' + (owner ? '<button type="button" class="btn y" id="sv">Guardar</button>' : '') + '</div>');
   m.querySelector('[data-x]').onclick = closeModal;
   if (!owner) return;
+  m.querySelector('#mb').onclick = () => { closeModal(); marcarLocal(); };
   const rl = m.querySelector('#rl');
   const sync = () => { riders.length = 0; rl.querySelectorAll('.rw').forEach(r => riders.push({ n: r.querySelector('[data-f=n]').value, e: r.querySelector('[data-f=e]').value })); };
   const redraw = () => { rl.innerHTML = riders.map(row).join(''); rl.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { sync(); riders.splice(+b.dataset.del, 1); redraw(); }); };
@@ -355,7 +379,7 @@ const icon = (html, w) => L.divIcon({ html, className: '', iconSize: [w, w], ico
 function initMap() {
   if (!window.L) { document.getElementById('map').innerHTML = '<div class="center"><p class="muted">No se pudo cargar el mapa.</p></div>'; return; }
   const b = (LOC && LOC.base) || BASE_FALLBACK;
-  map = L.map('map', { zoomControl: true }).setView([b.lat, b.lng], 14);
+  map = L.map('map', { zoomControl: true }).setView([b.lat, b.lng], 16);
   baseMap(map);
   map.attributionControl.setPrefix(false);
   map.on('click', e => { if (placing) fijarUbicacion(e.latlng); });
@@ -364,6 +388,8 @@ function drawMap() {
   if (!map) return;
   const b = LOC.base || BASE_FALLBACK;
   if (!markers.shop) markers.shop = L.marker([b.lat, b.lng], { icon: icon('<div class="mk-shop">S</div>', 34), interactive: false, keyboard: false }).addTo(map);
+  const bk = b.lat + ',' + b.lng;
+  if (bk !== lastBase) { markers.shop.setLatLng([b.lat, b.lng]); if (lastBase) map.flyTo([b.lat, b.lng], 16); else map.setView([b.lat, b.lng], 16); lastBase = bk; }
   const act = new Set(activos().filter(o => o.geo).map(o => o.id));
   Object.keys(markers.ped).forEach(id => { if (!act.has(id)) { map.removeLayer(markers.ped[id].m); delete markers.ped[id]; } });
   activos().filter(o => o.geo).forEach(o => {
@@ -383,10 +409,11 @@ function drawMap() {
     if (!m) { m = markers.rid[k] = L.marker([p.lat, p.lng], { icon: icon(html, 44), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map); m._h = html; }
     else { m.setLatLng([p.lat, p.lng]); if (m._h !== html) { m.setIcon(icon(html, 44)); m._h = html; } }
   });
-  if (!fitted) {
-    const pts = [[b.lat, b.lng], ...activos().filter(o => o.geo).map(o => [o.geo.lat, o.geo.lng])];
-    if (pts.length > 1) { map.fitBounds(pts, { padding: [50, 50], maxZoom: 16 }); fitted = true; }
-  }
+}
+function verTodos() {
+  if (!map) return;
+  const b = LOC.base || BASE_FALLBACK, pts = [[b.lat, b.lng], ...activos().filter(o => o.geo).map(o => [o.geo.lat, o.geo.lng])];
+  if (pts.length > 1) map.fitBounds(pts, { padding: [60, 60], maxZoom: 16 }); else map.flyTo([b.lat, b.lng], 16);
 }
 function verEnMapa(id, abrirTab) {
   selId = id; drawList.last = null; drawList();
@@ -402,7 +429,21 @@ function ubicar(o) {
   bn.querySelector('button').onclick = () => { placing = null; bn.hidden = true; };
   map && o.dir && map.getContainer().style.setProperty('cursor', 'crosshair');
 }
+function marcarLocal() {
+  placing = '__base';
+  document.querySelector('.tabs [data-tab=mapa]').click();
+  const bn = document.getElementById('banner'); bn.hidden = false;
+  bn.innerHTML = '<span>Tocá el mapa justo donde está el local</span><button type="button">Cancelar</button>';
+  bn.querySelector('button').onclick = () => { placing = null; bn.hidden = true; map.getContainer().style.removeProperty('cursor'); };
+  map && map.getContainer().style.setProperty('cursor', 'crosshair');
+}
 function fijarUbicacion(ll) {
+  const o0 = placing;
+  if (o0 === '__base') {
+    placing = null; document.getElementById('banner').hidden = true; map.getContainer().style.removeProperty('cursor');
+    updateDoc(ref(), { base: { lat: ll.lat, lng: ll.lng, src: 'manual' } }).then(() => toast('Local ubicado')).catch(e => toast('No se pudo guardar: ' + e.code));
+    return;
+  }
   const o = pedidos.find(x => x.id === placing); placing = null;
   document.getElementById('banner').hidden = true; map.getContainer().style.removeProperty('cursor');
   if (!o) return;
