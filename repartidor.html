@@ -221,6 +221,11 @@ function toast(msg, label, fn) {
 }
 
 /* ── pantalla ── */
+// Google Maps: se abre la app del celu con la navegación lista. Usamos el texto de la dirección (Google la ubica mejor que nosotros).
+const mapsQ = o => o.dir ? o.dir + ', Buenos Aires, Argentina' : (o.geo ? o.geo.lat + ',' + o.geo.lng : '');
+const navUrl = o => 'https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination=' + encodeURIComponent(mapsQ(o));
+const routeUrl = s => { const p = s.slice(0, 10), last = p[p.length - 1], mid = p.slice(0, -1).map(mapsQ).join('|');
+  return 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(mapsQ(last)) + (mid ? '&waypoints=' + encodeURIComponent(mid) : ''); };
 function render() {
   if (!ME) return;
   const s = stops(), cur = s[0];
@@ -242,12 +247,14 @@ function render() {
   } else {
     const warn = gps === 'denied' ? '<div class="banner">Activá la ubicación de este navegador para que el cliente vea la moto: Ajustes del celu, Safari o Chrome, Ubicación, Permitir.</div>'
       : gps === 'ok' && !lock ? '<div class="banner">Dejá esta pantalla abierta y prendida mientras repartís. Si cambiás de app o apagás la pantalla, el cliente deja de ver la moto.</div>' : '';
-    body = '<div class="scroll">' + warn + s.map((o, i) => {
+    const ruta = s.length > 1 ? '<a class="btn" href="' + esc(routeUrl(s)) + '" target="_blank" rel="noopener">Ruta completa en Google Maps (' + Math.min(s.length, 10) + ' paradas)</a>' : '';
+    const hint = '<div class="cm">Mientras Google Maps está abierto, el cliente no ve la moto en vivo. Al llegar, volvé a esta app y tocá «Llegué».</div>';
+    body = '<div class="scroll">' + warn + ruta + hint + s.map((o, i) => {
       const on = i === 0, cobrar = +o.cobrar || 0;
       return '<div class="card' + (on ? ' on' : '') + '"><div class="ct"><div class="num">' + (i + 1) + '</div><div class="cb"><span class="cn">' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' +
         '<span class="cm"><span>Pedido #' + o.num + '</span>' + (o.nota ? '<span>' + esc(o.nota) + '</span>' : '') + '</span></div>' +
         '<span class="pay ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></div>' +
-        '<div class="row">' + (o.tel ? '<a class="btn" href="tel:' + esc(String(o.tel).replace(/[^\d+]/g, '')) + '">Llamar</a>' : '') + (!on ? '<button class="btn" data-first="' + o.id + '">Ir primero</button>' : '') + '</div></div>';
+        '<div class="row">' + (mapsQ(o) ? '<a class="btn y" href="' + esc(navUrl(o)) + '" target="_blank" rel="noopener">Ir con Google Maps</a>' : '') + (o.tel ? '<a class="btn" href="tel:' + esc(String(o.tel).replace(/[^\d+]/g, '')) + '">Llamar</a>' : '') + (!on ? '<button class="btn" data-first="' + o.id + '">Ir primero</button>' : '') + '</div></div>';
     }).join('') + listosHtml + '</div>';
     const got = !!cur.llegoT;
     act = '<div class="act"><button class="go ' + (got ? 'ok' : '') + '" id="go">' + (got ? 'Entregado ✓' : 'Llegué a ' + esc(cur.nombre || 'destino')) + '</button></div>';
