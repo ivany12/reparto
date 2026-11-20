@@ -14,7 +14,11 @@ export const col = n => collection(db, 'reparto', LOCAL, n);
 /* Los mails se guardan como clave de mapa cambiando "." por "," (Firestore no admite puntos en claves de campo). */
 export const keyOf = e => String(e || '').trim().toLowerCase().replace(/\./g, ',');
 export const BASE = () => location.origin + location.pathname.replace(/[^/]*$/, '');
-export const trackUrl = tok => BASE() + 'track.html?t=' + tok + (LOCAL !== (window.REPARTO_LOCAL || 'shivos') ? '&l=' + LOCAL : '');
+const CORTO = location.hostname === 'seguimiento.shivos.com.ar';
+// En el dominio propio el link queda corto: seguimiento.shivos.com.ar/<codigo> (lo resuelve 404.html). Fuera de ahí, el link largo de siempre.
+export const trackUrl = tok => (CORTO && LOCAL === (window.REPARTO_LOCAL || 'shivos'))
+  ? BASE() + tok
+  : BASE() + 'track.html?t=' + tok + (LOCAL !== (window.REPARTO_LOCAL || 'shivos') ? '&l=' + LOCAL : '');
 
 getRedirectResult(auth).catch(() => { });
 export function login() {

@@ -1,0 +1,11 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shivo's · Seguimiento</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#000;color:#fff;font-family:"Segoe UI",system-ui,sans-serif;text-align:center;padding:24px}h1{color:#F1BB00;margin:0 0 8px}p{color:#aaa;margin:0}</style></head><body>
+<div id="m"><h1>Shivo's</h1><p>Abriendo tu pedido…</p></div>
+<script>
+// /<codigo> -> track.html?t=<codigo>   (GitHub Pages sirve este archivo para cualquier ruta que no existe)
+var m = location.pathname.match(/^\/([A-Za-z0-9]{6,20})\/?$/);
+var K = { repartidor: 1, track: 1, index: 1 };
+if (m && K[m[1]]) location.replace('/' + m[1] + '.html');
+else if (m) location.replace('/track.html?t=' + m[1]);
+else document.getElementById('m').innerHTML = '<h1>Shivo\'s</h1><p>No encontramos esa página. Si buscás tu pedido, abrí el link que te mandamos por WhatsApp.</p>';
+</script></body></html>
