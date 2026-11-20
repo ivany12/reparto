@@ -125,6 +125,44 @@ function moveMoto(p) {
   const dot = document.getElementById('dot');
   if (dot && isFinite(p.hdg)) dot.style.transform = 'rotate(' + p.hdg + 'deg)';
 }
+
+/* ── recorrido por las calles (OSRM); si falla, queda la línea punteada recta ── */
+let routePts = null, routeFor = '', routeFrom = null, routeAt = 0, routeBusy = false;
+const dkey = d => d.lat.toFixed(5) + ',' + d.lng.toFixed(5);
+function paintLine(st) {
+  if (line) { map.removeLayer(line); line = null; }
+  if (st !== 'camino' || !D.moto || !D.dest) return;
+  const col = getComputedStyle(document.documentElement).getPropertyValue('--acc').trim() || '#F1BB00';
+  const m = [D.moto.lat, D.moto.lng];
+  if (routePts && routeFor === dkey(D.dest) && routePts.length > 1) {
+    // recorta lo que la moto ya pasó: desde el punto de la ruta más cercano a ella
+    let bi = 0, bd = Infinity;
+    routePts.forEach((p, i) => { const d = (p[0] - m[0]) ** 2 + (p[1] - m[1]) ** 2; if (d < bd) { bd = d; bi = i; } });
+    const pts = [m, ...routePts.slice(Math.min(bi + 1, routePts.length - 1))];
+    line = L.featureGroup([
+      L.polyline(pts, { color: '#000', weight: 10, opacity: .55, lineCap: 'round', lineJoin: 'round', interactive: false }),
+      L.polyline(pts, { color: col, weight: 5, opacity: .95, lineCap: 'round', lineJoin: 'round', interactive: false })
+    ]).addTo(map);
+  } else {
+    line = L.polyline([m, [D.dest.lat, D.dest.lng]], { color: col, weight: 4, opacity: .9, dashArray: '2 10', lineCap: 'round', interactive: false }).addTo(map);
+  }
+}
+async function loadRoute(m, d) {
+  if (!hasMap || routeBusy) return;
+  const k = dkey(d), now = Date.now();
+  const moved = routeFrom ? GEO.dist(routeFrom, m) : Infinity;
+  if (routeFor === k && routePts && now - routeAt < 60000 && moved < 120) return; // ruta vigente
+  if (now - routeAt < 12000) return;                                               // no más de una consulta cada 12 s
+  routeBusy = true; routeAt = now;
+  try {
+    const u = 'https://router.project-osrm.org/route/v1/driving/' + m.lng + ',' + m.lat + ';' + d.lng + ',' + d.lat + '?overview=full&geometries=geojson';
+    const r = await fetch(u); const j = await r.json();
+    const c = j && j.routes && j.routes[0] && j.routes[0].geometry && j.routes[0].geometry.coordinates;
+    if (c && c.length > 1) { routePts = c.map(p => [p[1], p[0]]); routeFor = k; routeFrom = { lat: m.lat, lng: m.lng }; if (D) paintLine(D.estado); }
+  } catch (e) { /* queda la línea recta */ }
+  routeBusy = false;
+}
+
 function fit(force) {
   if (!hasMap) return;
   const now = Date.now();
@@ -133,6 +171,7 @@ function fit(force) {
   const pts = [];
   if (D && D.moto && D.estado !== 'entregado') pts.push([D.moto.lat, D.moto.lng]);
   if (D && D.dest) pts.push([D.dest.lat, D.dest.lng]);
+  if (D && D.estado === 'camino' && routePts && D.dest && routeFor === dkey(D.dest)) routePts.forEach((p, i) => { if (i % 4 === 0) pts.push(p); });
   if (!pts.length) return;
   const padB = Math.round($('sheet').getBoundingClientRect().height) + 30;
   if (pts.length === 1) map.setView(pts[0], 16, { animate: true });
@@ -186,8 +225,8 @@ function render() {
   if (D.moto && st === 'camino') moveMoto(D.moto);
   else if (motoM && (st === 'entregado' || st === 'llego')) { if (D.dest) moveMoto(st === 'entregado' ? D.dest : (D.moto || D.dest)); }
   if (hasMap) {
-    if (line) { map.removeLayer(line); line = null; }
-    if (st === 'camino' && D.moto && D.dest) line = L.polyline([[D.moto.lat, D.moto.lng], [D.dest.lat, D.dest.lng]], { color: getComputedStyle(document.documentElement).getPropertyValue('--acc').trim() || '#F1BB00', weight: 4, opacity: .9, dashArray: '2 10', lineCap: 'round' }).addTo(map);
+    paintLine(st);
+    if (st === 'camino' && D.moto && D.dest) loadRoute(D.moto, D.dest);
     if (st === 'preparando' || st === 'listo') { if (motoM) { map.removeLayer(motoM); motoM = null; } }
     fit(!render.did); render.did = true;
   }
