@@ -97,6 +97,7 @@ const ls = { get: k => { try { return localStorage.getItem(k); } catch { return 
 let EMAIL = '', ME = '', LOC = null, orders = [], listos = [], order = [], unsub = [];
 const quitados = new Set(); // listos que Nacho destildó
 let pos = null, gps = 'idle', watchId = null, lastSent = 0, lock = null;
+let fin = false, finT = 0, vuelta = false, hadStops = false; // fin: acaba de entregar el último · vuelta: volviendo al local
 const screen = html => { render.last = null; $app.innerHTML = html; };
 const center = html => screen('<div class="center">' + html + '</div>');
 
@@ -159,8 +160,10 @@ function ensureGeo(o) {
 function sync() {
   const s = stops();
   s.forEach(ensureGeo);
+  if (s.length) { hadStops = true; fin = false; vuelta = false; }
+  else if (hadStops && !vuelta && !fin) { fin = true; finT = Date.now(); hadStops = false; } // entregó el último: le ofrecemos avisar que vuelve
   if (s.length && watchId === null) startGps();
-  if (!s.length && watchId !== null) stopGps();
+  if (!s.length && watchId !== null && !fin && !vuelta) stopGps();
   s.forEach(o => { if (o.track) updateDoc(ref('track', o.track), { estado: o.llegoT ? 'llego' : 'camino', repartidor: ME, upd: Date.now() }).catch(() => { }); });
   publish(true); render();
 }
@@ -198,7 +201,7 @@ function publish(force) {
   if (!force && now - lastSent < 4000) return;
   lastSent = now;
   const s = stops();
-  setDoc(ref('pos', keyOf(EMAIL)), { name: ME, lat: pos.lat, lng: pos.lng, hdg: pos.hdg, t: now, activo: true }).catch(() => { });
+  setDoc(ref('pos', keyOf(EMAIL)), { name: ME, lat: pos.lat, lng: pos.lng, hdg: pos.hdg, t: now, activo: true, vuelta: !!vuelta }).catch(() => { });
   s.forEach((o, i) => {
     if (!o.track) return;
     const eta = GEO.etaMin(pos, s.slice(0, i + 1).map(x => x.geo));
@@ -241,6 +244,18 @@ function salir() {
   toast('Saliste con ' + ids.length + (ids.length > 1 ? ' pedidos' : ' pedido'));
   render();
 }
+const baseStop = () => ({ id: 'base', esBase: true, nombre: LOC.nombre || 'el local', dir: LOC.dir || '', geo: LOC.base || null });
+function volviendo() {
+  vuelta = true; fin = false; route = null;
+  if (watchId === null) startGps();
+  publish(true); render();
+}
+function llegueLocal() {
+  vuelta = false; fin = false; hadStops = false;
+  stopGps(); toast('Llegaste al local');
+  render();
+}
+function terminar() { fin = false; vuelta = false; stopGps(); render(); }
 function primero(o) { order = [o.id, ...stops().map(x => x.id).filter(id => id !== o.id)]; ls.set('rep_order', JSON.stringify(order)); sync(); }
 let tt = 0;
 function toast(msg, label, fn) {
@@ -280,7 +295,7 @@ function setFull(on) {
 }
 nq('.nclose').onclick = () => { if (history.state && history.state.nav) history.back(); else setFull(false); };
 window.addEventListener('popstate', () => { if (full) setFull(false); });
-nq('.ngo').onclick = () => { const o = stops()[0]; if (o) o.llegoT ? entregado(o) : llego(o); };
+nq('.ngo').onclick = () => { const o = stops()[0]; if (o) o.llegoT ? entregado(o) : llego(o); else if (vuelta) llegueLocal(); };
 nq('.ncen').onclick = () => {
   if (!nmap) return;
   if (follow) { follow = false; nq('.ncen').textContent = 'Seguirme'; const s = stops(), pts = [pos, ...s.filter(o => o.geo)].filter(Boolean).map(p => [p.lat, p.lng]); if (pts.length > 1) nmap.fitBounds(pts, { padding: [40, 40], maxZoom: 17 }); }
@@ -333,11 +348,11 @@ async function fetchRoute(cur) {
   fetching = false; updateNav();
 }
 function updateNav() {
-  const s = stops(), cur = s[0];
+  const s0 = stops(), cur = s0[0] || (vuelta ? baseStop() : null), s = s0.length ? s0 : (cur ? [cur] : []);
   if (!cur || !navWrap.isConnected) return;
   const bar = { a: nq('.na'), d: nq('.nd'), x: nq('.nx') };
-  nq('.ninfo').textContent = cur.nombre + ' · ' + cur.dir + (cur.depto ? ' · ' + cur.depto : '') + ((+cur.cobrar || 0) > 0 ? ' · Cobrar ' + money(cur.cobrar) : '');
-  const goB = nq('.ngo'); goB.textContent = cur.llegoT ? 'Entregado ✓' : 'Llegué a ' + (cur.nombre || 'destino'); goB.classList.toggle('ok', !!cur.llegoT);
+  nq('.ninfo').textContent = cur.esBase ? 'Volvés a ' + cur.nombre + (cur.dir ? ' · ' + cur.dir : '') : cur.nombre + ' · ' + cur.dir + (cur.depto ? ' · ' + cur.depto : '') + ((+cur.cobrar || 0) > 0 ? ' · Cobrar ' + money(cur.cobrar) : '');
+  const goB = nq('.ngo'); goB.textContent = cur.esBase ? 'Llegué al local' : cur.llegoT ? 'Entregado ✓' : 'Llegué a ' + (cur.nombre || 'destino'); goB.classList.toggle('ok', !!cur.llegoT);
   if (nmap) {
     if (pos) {
       if (!meM) meM = L.marker([pos.lat, pos.lng], { icon: nicon('<div class="mk-me"><div class="dot">' + ARROW + '</div></div>', 44), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(nmap);
@@ -353,6 +368,7 @@ function updateNav() {
     });
     Object.keys(destMs).forEach(id => { if (!s.some(o => o.id === id)) { destMs[id].m.remove(); delete destMs[id]; } });
   }
+  if (cur.esBase && pos && cur.geo && GEO.dist(pos, cur.geo) < 50) { llegueLocal(); return; } // llegó al local: se corta solo
   if (!pos) { bar.a.textContent = '…'; bar.d.textContent = 'Buscando GPS'; bar.x.textContent = 'Un momento'; return; }
   if (!cur.geo) { bar.a.textContent = '?'; bar.d.textContent = 'Sin ubicar'; bar.x.textContent = 'No encuentro esa dirección en el mapa. Usá «Ir con Google Maps».'; return; }
   const prog = route && route.id === cur.id ? onRoute(pos, route) : null, off = !!prog && prog.d > 80;
@@ -379,7 +395,7 @@ function attachNav() {
 function render() {
   if (!ME) return;
   const s = stops(), cur = s[0];
-  if (full && !s.length) { full = false; navWrap.classList.remove('full'); navWrap.remove(); }
+  if (full && !s.length && !vuelta) { full = false; navWrap.classList.remove('full'); navWrap.remove(); }
   const gpsChip = { ok: ['ok', 'GPS activo'], wait: ['warn', 'Buscando GPS…'], denied: ['warn', 'GPS sin permiso'], no: ['warn', 'Sin GPS'], idle: ['', 'GPS en espera'] }[gps];
   const head = '<header class="rh"><span class="wm">' + esc(LOC.nombre || 'Shivo\'s') + '</span><span class="rt">Reparto</span><span class="sp"></span>' +
     '<span class="chip ' + gpsChip[0] + '"><i></i>' + gpsChip[1] + '</span><button class="chip" id="who" aria-label="Salir">' + esc(ME) + '</button></header>';
@@ -389,8 +405,15 @@ function render() {
     const cobrar = +o.cobrar || 0;
     return '<label class="card pick"><input type="checkbox" data-pick="' + o.id + '"' + (quitados.has(o.id) ? '' : ' checked') + '><span class="cb"><span class="cn">#' + o.num + ' ' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' + (o.nota ? '<span class="cm">' + esc(o.nota) + '</span>' : '') + '</span>' +
       '<span class="pay ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></label>';
-  }).join('') + (s.length ? '<button class="btn y" id="salir2"' + (chosen.length ? '' : ' disabled') + '>Sumar al recorrido (' + chosen.length + ')</button>' : '') : '';
-  if (!s.length && !listos.length) {
+  }).join('') + (s.length || vuelta || fin ? '<button class="btn y" id="salir2"' + (chosen.length ? '' : ' disabled') + '>Sumar al recorrido (' + chosen.length + ')</button>' : '') : '';
+  if (!s.length && vuelta) {
+    const w2 = gps === 'denied' ? '<div class="banner">Activá la ubicación de este navegador para que el local vea que volvés.</div>' : '';
+    body = '<div class="scroll">' + w2 + '<div id="mapslot"></div><div class="cm">Volviendo al local. El local ve que venís y cuánto falta. Se corta solo cuando llegás.</div>' + listosHtml + '</div>';
+    act = '<div class="act"><button class="go" id="go">Llegué al local</button></div>';
+  } else if (!s.length && fin) {
+    body = '<div class="scroll"><div style="text-align:center;padding:28px 0 12px"><h2>¡Todo entregado!</h2><p class="muted">Avisá que volvés: el local ve cuánto falta y va armando el próximo.</p></div>' + listosHtml + '</div>';
+    act = '<div class="act"><button class="go" id="vuelvo">Volviendo al local</button><button class="btn" id="fin" style="margin-top:8px;width:100%">Terminar por hoy</button></div>';
+  } else if (!s.length && !listos.length) {
     body = '<div class="center"><h2>Sin pedidos para repartir</h2><p class="muted">Cuando un pedido esté listo en el local aparece acá. Elegís cuáles llevás y tocás «Salir». El GPS se prende solo.</p></div>';
   } else if (!s.length) {
     body = '<div class="scroll">' + listosHtml + '</div>';
@@ -417,10 +440,12 @@ function render() {
   document.querySelectorAll('[data-first]').forEach(b => b.onclick = () => primero(orders.find(x => x.id === b.dataset.first)));
   document.querySelectorAll('[data-pick]').forEach(c => c.onchange = () => { c.checked ? quitados.delete(c.dataset.pick) : quitados.add(c.dataset.pick); render(); });
   ['salir', 'salir2'].forEach(id => { const b = document.getElementById(id); if (b) b.onclick = salir; });
-  const g = document.getElementById('go'); if (g) g.onclick = () => { const o = stops()[0]; o.llegoT ? entregado(o) : llego(o); };
+  const g = document.getElementById('go'); if (g) g.onclick = () => { const o = stops()[0]; if (o) o.llegoT ? entregado(o) : llego(o); else if (vuelta) llegueLocal(); };
+  const vv = document.getElementById('vuelvo'); if (vv) vv.onclick = volviendo;
+  const ff = document.getElementById('fin'); if (ff) ff.onclick = terminar;
   attachNav();
 }
-setInterval(() => { if (ME) render(); }, 15000);
+setInterval(() => { if (ME) { if (fin && Date.now() - finT > 180000) { fin = false; if (!vuelta) stopGps(); } render(); } }, 15000);
 </script>
 </body>
 </html>

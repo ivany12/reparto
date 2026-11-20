@@ -191,7 +191,10 @@ function drawRiders() {
   const el = document.getElementById('riders'); if (!el) return;
   const on = ridersOn(), total = Object.keys(LOC.riders || {}).length;
   el.className = 'chip' + (on.length ? ' ok' : '');
-  el.lastChild.textContent = on.length ? on.map(([, p]) => p.name).join(', ') + ' en ruta' : total ? 'Sin repartidores en ruta' : 'Sin repartidores cargados';
+  const b = LOC.base, ruta = on.filter(([, p]) => !p.vuelta), vol = on.filter(([, p]) => p.vuelta);
+  const volTxt = vol.map(([, p]) => { const m = b && isFinite(p.lat) ? Math.max(1, Math.round(GEO.dist(p, b) * 1.35 / 283)) : null; return p.name + ' volviendo' + (m ? ' · ' + m + ' min' : ''); });
+  const parts = []; if (ruta.length) parts.push(ruta.map(([, p]) => p.name).join(', ') + ' en ruta'); parts.push(...volTxt);
+  el.lastChild.textContent = parts.length ? parts.join(' · ') : total ? 'Sin repartidores en ruta' : 'Sin repartidores cargados';
 }
 
 /* ── lista ── */
@@ -366,10 +369,10 @@ function despachar(o0) {
   const riders = Object.entries(LOC.riders || {});
   const listos = pedidos.filter(o => o.estado === 'listo').sort((a, b) => a.creado - b.creado);
   if (!riders.length) return modal('<h2>Faltan repartidores</h2><p class="muted">Cargá a Nacho en Ajustes, con su Gmail.</p><div class="acts"><button class="btn y" data-x>Entendido</button></div>').querySelector('[data-x]').onclick = closeModal;
-  const on = new Set(ridersOn().map(([k]) => k));
+  const onP = Object.fromEntries(ridersOn());
   const m = modal('<h2>Despachar</h2><p class="muted">Elegí qué pedidos lleva (va en este orden) y quién:</p><div class="chk">' +
     listos.map(o => '<label><input type="checkbox" value="' + o.id + '"' + (o.id === o0.id ? ' checked' : '') + '><span><b>#' + o.num + ' ' + esc(o.nombre) + '</b><br>' + esc(o.dir) + '</span></label>').join('') + '</div>' +
-    '<div class="row">' + riders.map(([k, n]) => '<button class="btn y" data-r="' + esc(k) + '">' + esc(n) + (on.has(k) ? ' · en ruta' : '') + '</button>').join('') + '</div>' +
+    '<div class="row">' + riders.map(([k, n]) => '<button class="btn y" data-r="' + esc(k) + '">' + esc(n) + (onP[k] ? (onP[k].vuelta ? ' · volviendo' : ' · en ruta') : '') + '</button>').join('') + '</div>' +
     '<div class="acts"><button class="btn" data-x>Cancelar</button></div>');
   m.querySelector('[data-x]').onclick = closeModal;
   m.querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
