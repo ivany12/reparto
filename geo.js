@@ -56,27 +56,54 @@
     return Array.from(b, x => A[x % A.length]).join('');
   }
 
-  /* Dirección -> {lat,lng,src} o null. Primero Georef (API oficial de direcciones de Argentina), después Nominatim. */
-  async function geocode(dir) {
+  const getJson = async url => {
+    try {
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 8000);
+      const r = await fetch(url, { signal: ctl.signal }); clearTimeout(t);
+      return r.ok ? await r.json() : null;
+    } catch (e) { return null; }
+  };
+  const ABBR = [[/\b(?:pje|psje)\b\.?/gi, 'Pasaje'], [/\bav\b\.?/gi, 'Avenida'], [/\bgral\b\.?/gi, 'General'], [/\bdr\b\.?/gi, 'Doctor'], [/\bcnel\b\.?/gi, 'Coronel'], [/\bing\b\.?/gi, 'Ingeniero'], [/\bpres\b\.?/gi, 'Presidente'], [/\bsta\b\.?/gi, 'Santa'], [/\bsto\b\.?/gi, 'Santo'], [/\bbv\b\.?/gi, 'Boulevard']];
+  const normDir = t => { ABBR.forEach(a => { t = t.replace(a[0], a[1]); }); return t.replace(/\s+/g, ' ').trim(); };
+  const TIPO = /^(pasaje|avenida|calle|boulevard|diagonal|camino)\s+/i;
+  const fromGeoref = d => {
+    const u = d && d.ubicacion;
+    if (!u || u.lat == null || !inBox({ lat: u.lat, lng: u.lon })) return null;
+    return { lat: +u.lat, lng: +u.lon, label: d.nomenclatura || (d.calle && d.calle.nombre) || '', src: 'georef', exact: !!(d.altura && d.altura.valor != null) };
+  };
+  const fromOsm = x => {
+    if (!x || !inBox({ lat: +x.lat, lng: +x.lon })) return null;
+    return { lat: +x.lat, lng: +x.lon, label: String(x.display_name || '').split(',').slice(0, 4).join(','), src: 'osm', exact: !!(x.address && x.address.house_number) };
+  };
+
+  /* Dirección -> lista de candidatos [{lat,lng,label,src,exact}] (los exactos primero). Vacía si no encuentra nada.
+     Prueba variantes del texto (Pje -> Pasaje, sin "Pasaje") en Georef (CABA y provincia de Buenos Aires) y, si no hay una exacta, en OpenStreetMap. */
+  async function search(dir) {
     dir = String(dir || '').trim();
-    if (!dir) return null;
+    if (dir.length < 4) return [];
     const m = dir.match(/^(.*?\d{1,5})/); // calle + altura; descarta piso/depto
-    const q = (m ? m[1] : dir).replace(/\s+/g, ' ').trim();
-    const get = async url => {
-      try {
-        const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 8000);
-        const r = await fetch(url, { signal: ctl.signal }); clearTimeout(t);
-        return r.ok ? await r.json() : null;
-      } catch (e) { return null; }
-    };
-    let j = await get('https://apis.datos.gob.ar/georef/api/direcciones?max=1&provincia=02&direccion=' + encodeURIComponent(q));
-    let u = j && j.direcciones && j.direcciones[0] && j.direcciones[0].ubicacion;
-    if (u && inBox({ lat: u.lat, lng: u.lon })) return { lat: +u.lat, lng: +u.lon, src: 'georef' };
-    j = await get('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ar&q=' + encodeURIComponent(q + ', Buenos Aires'));
-    u = Array.isArray(j) && j[0];
-    if (u && inBox({ lat: +u.lat, lng: +u.lon })) return { lat: +u.lat, lng: +u.lon, src: 'osm' };
-    return null;
+    const base = normDir(m ? m[1] : dir);
+    const vs = [...new Set([base, base.replace(TIPO, '')])].filter(Boolean);
+    const out = [];
+    const add = c => { if (c && !out.some(o => dist(o, c) < 30)) out.push(c); };
+    const G = 'https://apis.datos.gob.ar/georef/api/direcciones?max=3&direccion=';
+    const jobs = [];
+    vs.forEach(q => ['02', '06'].forEach(prov => jobs.push(getJson(G + encodeURIComponent(q) + '&provincia=' + prov).then(j => ((j && j.direcciones) || []).forEach(d => add(fromGeoref(d)))))));
+    await Promise.all(jobs);
+    if (!out.some(c => c.exact)) {
+      for (const q of vs.slice(0, 2)) {
+        const j = await getJson('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=3&addressdetails=1&countrycodes=ar&q=' + encodeURIComponent(q + ', Buenos Aires'));
+        (Array.isArray(j) ? j : []).forEach(x => add(fromOsm(x)));
+      }
+    }
+    out.sort((a, b) => (b.exact ? 1 : 0) - (a.exact ? 1 : 0));
+    return out.slice(0, 5);
+  }
+  /* Primer candidato como {lat,lng,src} o null. */
+  async function geocode(dir) {
+    const r = await search(dir);
+    return r[0] ? { lat: r[0].lat, lng: r[0].lng, src: r[0].src } : null;
   }
 
-  window.GEO = { waPhone, dist, bearing, etaMin, firstName, token, geocode, inBox };
+  window.GEO = { waPhone, dist, bearing, etaMin, firstName, token, geocode, search, inBox };
 })();

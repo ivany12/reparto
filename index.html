@@ -91,6 +91,13 @@ h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spa
 .mk-rider .dot{position:absolute;inset:6px;border-radius:50%;background:var(--ok);border:3px solid #000;display:grid;place-items:center}
 .mk-rider svg{width:16px;height:16px}
 .mk-rider b{position:absolute;left:50%;top:-18px;transform:translateX(-50%);background:#000;color:#fff;font:700 12px var(--body);padding:2px 6px;border-radius:6px;white-space:nowrap}
+#loc{display:flex;flex-direction:column;gap:8px}
+#locst{font-size:14px;color:var(--mute);overflow-wrap:anywhere}#locst.ok{color:var(--ok)}#locst.warn{color:var(--warn)}
+#locc{display:flex;flex-wrap:wrap;gap:6px}#locc:empty{display:none}
+#locc button{border:1px solid var(--line);background:var(--panel2);border-radius:99px;padding:6px 12px;font-size:13px;cursor:pointer;text-align:left;max-width:100%}
+#locc button.on{border-color:var(--acc);color:var(--acc)}
+#locmap{height:210px;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#0b0b0b}
+.mk-pin{width:36px;height:36px;border-radius:50%;background:var(--acc);border:3px solid #000;display:grid;place-items:center;box-shadow:0 0 0 2px var(--acc)}.mk-pin svg{width:20px;height:20px}
 </style>
 </head>
 <body data-tab="pedidos">
@@ -262,25 +269,24 @@ function geocodificar(id, tok, dir) {
 function crearPedido(f) {
   const t = Date.now(), id = 'p' + t.toString(36) + Math.random().toString(36).slice(2, 5), tok = GEO.token(), hoy = dayKey(t);
   const num = pedidos.filter(o => dayKey(o.creado) === hoy).reduce((m, o) => Math.max(m, o.num || 0), 0) + 1;
-  const o = { id, num, nombre: f.nombre, tel: f.tel, dir: f.dir, depto: f.depto, nota: f.nota, cobrar: f.cobrar, estado: 'cocina', track: tok, creado: t, upd: t, repartidor: '', repartidorEmail: '', linkEnviado: f.wa ? t : null };
+  const o = { id, num, nombre: f.nombre, tel: f.tel, dir: f.dir, depto: f.depto, nota: f.nota, cobrar: f.cobrar, estado: 'cocina', track: tok, creado: t, upd: t, repartidor: '', repartidorEmail: '', linkEnviado: f.wa ? t : null, ...(f.geo ? { geo: f.geo } : {}) };
   setDoc(ref('pedidos', id), o).catch(e => toast('No se pudo guardar: ' + e.code));
-  setDoc(ref('track', tok), { tok, pedidoId: id, num, nombre: GEO.firstName(f.nombre), dir: f.dir + (f.depto ? ' · ' + f.depto : ''), estado: 'preparando', local: LOC.nombre || '', tel: LOC.tel || '', color: LOC.color || '', antes: 0, upd: t }).catch(() => { });
+  setDoc(ref('track', tok), { tok, pedidoId: id, num, nombre: GEO.firstName(f.nombre), dir: f.dir + (f.depto ? ' · ' + f.depto : ''), estado: 'preparando', local: LOC.nombre || '', tel: LOC.tel || '', color: LOC.color || '', antes: 0, upd: t, ...(f.geo ? { dest: { lat: f.geo.lat, lng: f.geo.lng } } : {}) }).catch(() => { });
   if (f.wa) window.open(waUrl(o), '_blank'); // síncrono dentro del toque, para que el navegador no lo bloquee
-  geocodificar(id, tok, f.dir);
+  if (!f.geo) geocodificar(id, tok, f.dir);
   toast('Pedido #' + num + ' cargado' + (f.wa ? ': tocá enviar en WhatsApp' : ''));
 }
 
 function editarPedido(o, f) {
   const t = Date.now(), cambioDir = f.dir !== o.dir;
   const p = { nombre: f.nombre, tel: f.tel, dir: f.dir, depto: f.depto, nota: f.nota, cobrar: f.cobrar, upd: t };
-  if (cambioDir) p.geo = deleteField();
+  const q = { nombre: GEO.firstName(f.nombre), dir: f.dir + (f.depto ? ' · ' + f.depto : ''), upd: t };
+  let regeo = false;
+  if (f.geo && (cambioDir || !o.geo || GEO.dist(o.geo, f.geo) > 3)) { p.geo = f.geo; q.dest = { lat: f.geo.lat, lng: f.geo.lng }; }
+  else if (cambioDir) { p.geo = deleteField(); q.dest = deleteField(); regeo = true; }
   updateDoc(ref('pedidos', o.id), p).catch(e => toast('No se pudo guardar: ' + e.code));
-  if (o.track) {
-    const q = { nombre: GEO.firstName(f.nombre), dir: f.dir + (f.depto ? ' · ' + f.depto : ''), upd: t };
-    if (cambioDir) q.dest = deleteField();
-    updateDoc(ref('track', o.track), q).catch(() => { });
-  }
-  if (cambioDir) geocodificar(o.id, o.track, f.dir);
+  if (o.track) updateDoc(ref('track', o.track), q).catch(() => { });
+  if (regeo) geocodificar(o.id, o.track, f.dir);
   toast('Pedido #' + o.num + ' actualizado' + (o.linkEnviado && f.tel !== o.tel ? '. Cambió el teléfono: reenviá el link' : ''));
 }
 
@@ -300,6 +306,7 @@ function formPedido(ed) {
   const m = modal('<h2>' + (ed ? 'Editar pedido #' + ed.num : 'Nuevo pedido') + '</h2><form id="f" autocomplete="off" style="display:flex;flex-direction:column;gap:12px">' +
     '<label>Nombre<input name="nombre" required></label><label>Teléfono (WhatsApp)<input name="tel" type="tel" inputmode="tel" required placeholder="11 5555-0101"></label>' +
     '<label>Dirección<input name="dir" required placeholder="Calle y número"></label>' +
+    '<div id="loc"><div id="locst"></div><div id="locc"></div><div id="locmap"></div></div>' +
     '<div class="g2"><label>Piso / depto<input name="depto"></label><label>Cobrar en la puerta ($)<input name="cobrar" inputmode="numeric" placeholder="0 = ya pagado"></label></div>' +
     '<label>Nota para el repartidor<textarea name="nota" placeholder="Timbre, entre calles, etc."></textarea></label>' +
     (ed ? '' : '<label class="ck"><input type="checkbox" name="wa"> Enviar el link por WhatsApp ahora (si no, lo mandás después con «Enviar link»)</label>') +
@@ -307,11 +314,50 @@ function formPedido(ed) {
   m.querySelector('[data-x]').onclick = closeModal;
   if (ed) { const f = m.querySelector('#f'); f.nombre.value = ed.nombre || ''; f.tel.value = ed.tel || ''; f.dir.value = ed.dir || ''; f.depto.value = ed.depto || ''; f.cobrar.value = ed.cobrar || ''; f.nota.value = ed.nota || ''; }
   m.querySelector('[name=nombre]').focus();
-  m.querySelector('#f').onsubmit = e => {
+  /* Ubicación: se busca sola al escribir; se corrige moviendo el pin o tocando el mapa. */
+  const F = m.querySelector('#f'), st = m.querySelector('#locst'), cc = m.querySelector('#locc'), btn = F.querySelector('.acts .y');
+  const PIN = '<div class="mk-pin"><svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11L12 3L21 11M6 9.5V21H18V9.5"/></svg></div>';
+  let lm = null, pin = null, sel = ed && ed.geo ? { lat: ed.geo.lat, lng: ed.geo.lng, src: ed.geo.src || 'manual', exact: true, label: 'ubicación guardada' } : null, cands = [], tim = 0, seq = 0, warned = false;
+  const say = (cls, t) => { st.className = cls; st.textContent = t; };
+  const paint = () => {
+    warned = false; btn.textContent = ed ? 'Guardar cambios' : 'Cargar pedido';
+    if (!sel) return;
+    if (lm) { if (!pin) { pin = L.marker([sel.lat, sel.lng], { draggable: true, icon: L.divIcon({ html: PIN, className: '', iconSize: [36, 36], iconAnchor: [18, 18] }) }).addTo(lm); pin.on('dragend', () => { const q = pin.getLatLng(); sel = { lat: q.lat, lng: q.lng, src: 'manual', exact: true, label: '' }; paint(); }); } else pin.setLatLng([sel.lat, sel.lng]); lm.setView([sel.lat, sel.lng], Math.max(lm.getZoom(), 17)); }
+    if (sel.src === 'manual' && !sel.label) say('ok', '✓ Ubicación marcada a mano');
+    else if (sel.exact) say('ok', '✓ Dirección encontrada: ' + sel.label);
+    else say('warn', '⚠ Solo encontré la calle (aproximada): ' + sel.label + '. Mové el pin a la casa.');
+    cc.querySelectorAll('button').forEach((b, i) => b.classList.toggle('on', cands[i] && sel.lat === cands[i].lat && sel.lng === cands[i].lng));
+  };
+  if (window.L) {
+    const b = (ed && ed.geo) || LOC.base || BASE_FALLBACK;
+    lm = L.map(m.querySelector('#locmap'), { zoomControl: true, attributionControl: false }).setView([b.lat, b.lng], ed && ed.geo ? 17 : 14);
+    baseMap(lm);
+    lm.on('click', e => { sel = { lat: e.latlng.lat, lng: e.latlng.lng, src: 'manual', exact: true, label: '' }; paint(); });
+    setTimeout(() => lm.invalidateSize(), 60);
+  } else m.querySelector('#locmap').hidden = true;
+  const buscar = async () => {
+    const q = F.dir.value.trim(), my = ++seq;
+    if (q.length < 4) { say('', ''); return; }
+    say('', 'Buscando…');
+    let r = []; try { r = await GEO.search(q); } catch { }
+    if (my !== seq) return;
+    cands = r; cc.innerHTML = '';
+    r.slice(0, 4).forEach((c, i) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = (c.exact ? '' : '~ ') + (c.label || 'Opción ' + (i + 1)); b.onclick = () => { sel = { ...c }; paint(); }; cc.appendChild(b); });
+    if (r.length) { sel = { ...r[0] }; paint(); }
+    else say('warn', 'No encuentro esa dirección. Tocá el mapa donde es.');
+  };
+  if (sel) paint(); else if (ed && ed.dir) buscar();
+  F.dir.addEventListener('input', () => { sel = null; cands = []; cc.innerHTML = ''; if (pin) { pin.remove(); pin = null; } warned = false; btn.textContent = ed ? 'Guardar cambios' : 'Cargar pedido'; clearTimeout(tim); tim = setTimeout(buscar, 900); });
+  F.onsubmit = e => {
     e.preventDefault();
     const d = Object.fromEntries(new FormData(e.target)), t = s => String(s || '').trim();
     if (!t(d.nombre) || !t(d.tel) || !t(d.dir)) return;
-    const f = { nombre: t(d.nombre), tel: t(d.tel), dir: t(d.dir), depto: t(d.depto), nota: t(d.nota), cobrar: Math.max(0, parseInt(String(d.cobrar).replace(/\D/g, ''), 10) || 0), wa: !!d.wa };
+    if ((!sel || !sel.exact) && !warned) { // sin ubicación segura: avisamos una vez, y a la segunda deja cargar igual
+      warned = true; btn.textContent = 'Cargar igual';
+      say('warn', !sel ? 'Falta ubicar la dirección: tocá el mapa donde es, o «Cargar igual» para marcarla después.' : 'La ubicación es aproximada: mové el pin a la casa, o «Cargar igual».');
+      return;
+    }
+    const f = { nombre: t(d.nombre), tel: t(d.tel), dir: t(d.dir), depto: t(d.depto), nota: t(d.nota), cobrar: Math.max(0, parseInt(String(d.cobrar).replace(/\D/g, ''), 10) || 0), wa: !!d.wa, geo: sel && sel.exact ? { lat: sel.lat, lng: sel.lng, src: sel.src } : null };
     if (ed) editarPedido(ed, f); else crearPedido(f);
     closeModal();
   };
