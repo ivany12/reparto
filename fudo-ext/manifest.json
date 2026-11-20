@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Shivos · Fudo a Reparto",
+  "description": "Cuando confirmás un pedido a domicilio en Fudo, lo manda solo a Shivos Reparto (sin volver a cargarlo).",
+  "version": "1.0.0",
+  "permissions": ["storage"],
+  "host_permissions": ["https://firestore.googleapis.com/*"],
+  "content_scripts": [
+    { "matches": ["https://app-v2.fu.do/*"], "js": ["lib.js", "content.js"], "run_at": "document_idle" }
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Shivos Reparto", "default_popup": "popup.html" },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+}

@@ -110,7 +110,7 @@ h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spa
 <script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
 <script src="map.js"></script>
 <script type="module">
-import { ref, col, getDoc, setDoc, updateDoc, onSnapshot, query, where, deleteField, keyOf, trackUrl, login, onUser, logout } from './fb.js';
+import { ref, col, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, deleteField, keyOf, trackUrl, login, onUser, logout } from './fb.js';
 const $app = document.getElementById('app');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = n => '$ ' + Math.round(n || 0).toLocaleString('es-AR');
@@ -186,6 +186,7 @@ function start() {
   }
   onSnapshot(ref(), s => { if (s.exists()) { LOC = s.data(); drawRiders(); drawMap(); } });
   onSnapshot(query(col('pedidos'), where('creado', '>=', startOfDay(1))), snap => { pedidos = []; snap.forEach(d => pedidos.push(d.data())); drawList(); drawMap(); }, err => toast('Sin conexión con la base: ' + err.code));
+  onSnapshot(col('inbox'), snap => (snap.docChanges ? snap.docChanges() : []).forEach(ch => { if (ch.type !== 'removed') importarFudo(ch.doc.data(), ch.doc.id); }), () => { });
   onSnapshot(col('pos'), snap => { posiciones = {}; snap.forEach(d => posiciones[d.id] = d.data()); drawRiders(); drawMap(); }, () => { });
   setInterval(() => { drawList(); drawRiders(); }, 30000);
 }
@@ -220,7 +221,7 @@ function card(o) {
   const cobrar = +o.cobrar || 0, sel = o.id === selId;
   const rider = o.repartidor ? '<span>🛵 ' + esc(o.repartidor) + (o.llegoT && o.estado === 'camino' ? ' · <b class="okc">llegó</b>' : '') + '</span>' : '';
   const link = o.linkEnviado ? '<span class="okc">Link enviado ✓</span>' : '<span class="warn">Link sin enviar</span>';
-  const geo = o.geo ? '' : '<span class="warn">Sin ubicar en el mapa</span>';
+  const geo = o.geo ? (o.geo.aprox ? '<span class="warn">Ubicación aproximada: revisala en el mapa</span>' : '') : '<span class="warn">Sin ubicar en el mapa</span>';
   let acts = '';
   if (o.estado === 'cocina') acts += '<button class="btn sm y" data-a="listo" data-id="' + o.id + '">Listo →</button>';
   if (o.estado === 'listo') acts += '<button class="btn sm y" data-a="despachar" data-id="' + o.id + '">Despachar →</button>';
@@ -228,12 +229,13 @@ function card(o) {
   if (o.estado === 'cocina' || o.estado === 'listo') acts += '<button class="btn sm" data-a="editar" data-id="' + o.id + '">Editar</button>';
   if (o.estado !== 'entregado' && o.estado !== 'cancelado') {
     acts += '<button class="btn sm" data-a="link" data-id="' + o.id + '">' + (o.linkEnviado ? 'Reenviar link' : 'Enviar link') + '</button>';
-    if (!o.geo) acts += '<button class="btn sm" data-a="ubicar" data-id="' + o.id + '">Ubicar en mapa</button>';
+    if (!o.geo || o.geo.aprox) acts += '<button class="btn sm" data-a="ubicar" data-id="' + o.id + '">Ubicar en mapa</button>';
     acts += '<button class="btn sm bad" data-a="cancelar" data-id="' + o.id + '">Cancelar</button>';
   }
   return '<div class="card' + (sel ? ' sel' : '') + '" data-card="' + o.id + '"><div class="ct"><div class="num">' + o.num + '</div><div class="cb"><span class="cn">' + esc(o.nombre) + '</span>' +
     '<span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' +
-    '<span class="cm"><span>' + esc(o.tel) + '</span><span>hace ' + mins(o.creado) + ' min</span>' + rider + '</span>' +
+    '<span class="cm"><span>' + esc(o.tel) + '</span><span>hace ' + mins(o.creado) + ' min</span>' + rider + (o.fudo ? '<span>Fudo #' + esc(o.fudo) + '</span>' : '') + '</span>' +
+    (o.pagoFudo ? '<span class="cm">Pago en Fudo: ' + esc(o.pagoFudo) + '</span>' : '') +
     (o.nota ? '<span class="cm">» ' + esc(o.nota) + '</span>' : '') + tiempos(o) +
     (o.estado !== 'entregado' && o.estado !== 'cancelado' ? '<span class="cm">' + link + geo + '</span>' : '') + '</div>' +
     '<span class="tag ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></div>' +
@@ -292,15 +294,41 @@ function geocodificar(id, tok, dir) {
     updateDoc(ref('track', tok), { dest: { lat: g.lat, lng: g.lng } }).catch(() => { });
   });
 }
-function crearPedido(f) {
-  const t = Date.now(), id = 'p' + t.toString(36) + Math.random().toString(36).slice(2, 5), tok = GEO.token(), hoy = dayKey(t);
-  const num = pedidos.filter(o => dayKey(o.creado) === hoy).reduce((m, o) => Math.max(m, o.num || 0), 0) + 1;
-  const o = { id, num, nombre: f.nombre, tel: f.tel, dir: f.dir, depto: f.depto, nota: f.nota, cobrar: f.cobrar, estado: 'cocina', track: tok, creado: t, upd: t, repartidor: '', repartidorEmail: '', linkEnviado: f.wa ? t : null, ...(f.geo ? { geo: f.geo } : {}) };
+function crearPedido(f, x = {}) {
+  const t = Date.now(), id = x.id || 'p' + t.toString(36) + Math.random().toString(36).slice(2, 5), tok = GEO.token(), hoy = dayKey(t);
+  const num0 = pedidos.filter(o => dayKey(o.creado) === hoy).reduce((m, o) => Math.max(m, o.num || 0), 0) + 1;
+  const num = Math.max(num0, crearPedido.u && crearPedido.u.d === hoy ? crearPedido.u.n + 1 : 0); crearPedido.u = { d: hoy, n: num }; // varios pedidos casi a la vez no repiten número
+  const o = { id, num, nombre: f.nombre, tel: f.tel, dir: f.dir, depto: f.depto, nota: f.nota, cobrar: f.cobrar, estado: 'cocina', track: tok, creado: t, upd: t, repartidor: '', repartidorEmail: '', linkEnviado: f.wa ? t : null, ...(f.geo ? { geo: f.geo } : {}), ...(x.fudo ? { fudo: x.fudo, pagoFudo: x.pago || '' } : {}) };
   setDoc(ref('pedidos', id), o).catch(e => toast('No se pudo guardar: ' + e.code));
   setDoc(ref('track', tok), { tok, pedidoId: id, num, nombre: GEO.firstName(f.nombre), dir: f.dir + (f.depto ? ' · ' + f.depto : ''), estado: 'preparando', local: LOC.nombre || '', tel: LOC.tel || '', color: LOC.color || '', antes: 0, upd: t, ...(f.geo ? { dest: { lat: f.geo.lat, lng: f.geo.lng } } : {}) }).catch(() => { });
   if (f.wa) window.open(waUrl(o), '_blank'); // síncrono dentro del toque, para que el navegador no lo bloquee
   if (!f.geo) geocodificar(id, tok, f.dir);
-  toast('Pedido #' + num + ' cargado' + (f.wa ? ': tocá enviar en WhatsApp' : ''));
+  toast(x.fudo ? 'Pedido #' + num + ' llegó desde Fudo (' + f.nombre + ')' : 'Pedido #' + num + ' cargado' + (f.wa ? ': tocá enviar en WhatsApp' : ''));
+}
+
+/* ── pedidos que llegan solos desde Fudo (extensión de la caja -> bandeja inbox) ── */
+const importando = new Set();
+async function importarFudo(x, docId) {
+  if (!x || !x.fudo) return;
+  const k = docId + ':' + (x.t || 0);
+  if (importando.has(k)) return; importando.add(k);
+  const id = 'f' + x.fudo;
+  try {
+    const cur = await getDoc(ref('pedidos', id));
+    const f = { nombre: String(x.nombre || 'Cliente'), tel: String(x.tel || ''), dir: String(x.dir || ''), depto: '', nota: '', cobrar: Math.max(0, Math.round(+x.cobrar || 0)), wa: false, geo: null };
+    if (cur.exists()) {
+      const o = cur.data();
+      if (o.estado === 'cocina' || o.estado === 'listo') { editarPedido(o, { ...f, depto: o.depto || '', nota: o.nota || '', geo: null }); updateDoc(ref('pedidos', id), { pagoFudo: x.pago || '' }).catch(() => { }); }
+    } else {
+      let g = null;
+      try {
+        const r = await GEO.search(f.dir, zona()), e = r.find(c => c.exact) || r[0];
+        if (e) g = { lat: e.lat, lng: e.lng, src: e.src, ...(e.exact ? {} : { aprox: true }) };
+      } catch { }
+      crearPedido({ ...f, geo: g }, { id, fudo: x.fudo, pago: x.pago });
+    }
+    await deleteDoc(ref('inbox', docId));
+  } catch (e) { console.error('Fudo', e); importando.delete(k); }
 }
 
 function editarPedido(o, f) {
@@ -422,11 +450,21 @@ function ajustes() {
     '<h2 style="font-size:20px">Repartidores</h2><div id="rl" style="display:flex;flex-direction:column;gap:8px">' + riders.map(row).join('') + '</div>' +
     (owner ? '<button type="button" class="btn sm" id="ra">+ Agregar repartidor</button>' : '') +
     '<p class="muted">Cada repartidor entra a <b>repartidor.html</b> con su Gmail.</p>' +
+    '<h2 style="font-size:20px">Fudo en la caja</h2><p class="muted">Clave para la extensión de Chrome de la compu de caja. Se pega una sola vez ahí; sin ella nadie puede mandar pedidos.</p><div class="row"><button type="button" class="btn" id="fk">Ver o generar clave</button></div><input id="fkv" readonly hidden style="font-family:monospace">' +
     '<h2 style="font-size:20px">Equipo del local</h2><label>Gmails con acceso al panel (uno por línea)<textarea id="s-s" rows="3"' + dis + '>' + esc(staff.join('\n')) + '</textarea></label>' +
     '<div class="acts"><button type="button" class="btn" data-x>Cerrar</button>' + (owner ? '<button type="button" class="btn y" id="sv">Guardar</button>' : '') + '</div>');
   m.querySelector('[data-x]').onclick = closeModal;
   if (!owner) return;
   m.querySelector('#mb').onclick = () => { closeModal(); marcarLocal(); };
+  m.querySelector('#fk').onclick = async () => {
+    const box = m.querySelector('#fkv');
+    try {
+      let s = await getDoc(ref('secretos', 'ingest')), v = s.exists() ? s.data().valor : '';
+      if (!v) { const b = new Uint8Array(18); crypto.getRandomValues(b); v = Array.from(b, x => 'abcdefghjkmnpqrstuvwxyz23456789'[x % 31]).join(''); await setDoc(ref('secretos', 'ingest'), { valor: v }); }
+      box.value = v; box.hidden = false; box.select();
+      try { await navigator.clipboard.writeText(v); toast('Clave copiada'); } catch { toast('Seleccionada: copiala (Ctrl+C)'); }
+    } catch (e) { toast('No se pudo: ' + (e.code || e.message)); }
+  };
   const rl = m.querySelector('#rl');
   const sync = () => { riders.length = 0; rl.querySelectorAll('.rw').forEach(r => riders.push({ n: r.querySelector('[data-f=n]').value, e: r.querySelector('[data-f=e]').value })); };
   const redraw = () => { rl.innerHTML = riders.map(row).join(''); rl.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { sync(); riders.splice(+b.dataset.del, 1); redraw(); }); };

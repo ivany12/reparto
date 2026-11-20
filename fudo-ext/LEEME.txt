@@ -1,0 +1,18 @@
+Shivo's · Fudo a Reparto  (extensión de Chrome para la compu de caja)
+
+INSTALAR (una sola vez, en la compu de la caja)
+1. Descomprimí esta carpeta (clic derecho > Extraer todo) y dejala en un lugar fijo, por ejemplo Documentos\shivos-fudo-ext. No la borres ni la muevas.
+2. En Chrome entrá a  chrome://extensions
+3. Prendé "Modo de desarrollador" (arriba a la derecha).
+4. Tocá "Cargar descomprimida" y elegí la carpeta.
+5. Tocá el ícono de la extensión (la pieza de rompecabezas, y fijala) y pegá la CLAVE que sale en el panel de Reparto:
+   Ajustes > Fudo en la caja > Ver o generar clave.  Guardar.
+6. Abrí Fudo en la pantalla Delivery y dejala abierta.
+
+USO
+No hay que hacer nada. Cuando entra un pedido a domicilio (con dirección y teléfono) lo manda solo a Reparto.
+Abajo a la izquierda de Fudo aparece un cartelito amarillo: "Reparto: pedido #123 enviado".
+ - Naranja: falta la clave.  Rojo: no se pudo enviar (clave mal o sin internet). Tocar el cartel reenvía el último pedido.
+ - Los pedidos de Rappi / PedidosYa se ignoran.
+ - Para saber si el pedido ya está pagado, la extensión abre un instante el detalle del pedido cuando nadie está usando la pantalla, y vuelve donde estabas.
+   Si no puede, lo manda igual a los 25 segundos como "Sin verificar" (el repartidor cobra el total por las dudas).

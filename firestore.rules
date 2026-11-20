@@ -62,6 +62,25 @@ service cloud.firestore {
           || (isRider(l) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['moto','antes','etaMin','estado','repartidor','salio','dest','upd']));
       }
 
+      // Bandeja de entrada de pedidos que llegan desde Fudo (extensión de Chrome de la caja).
+      // Sin login: la extensión escribe con una clave guardada en secretos/ingest (solo la ve el dueño). El panel los importa y los borra.
+      function claveOk() { return request.resource.data.key == get(/databases/$(database)/documents/reparto/$(l)/secretos/ingest).data.valor; }
+      match /secretos/{k} {
+        allow read, write: if signed() && em() == loc(l).data.owner;
+      }
+      match /inbox/{d} {
+        allow read, delete: if isStaff(l);
+        allow create, update: if claveOk()
+          && request.resource.data.keys().hasOnly(['key','fudo','nombre','tel','dir','total','cobrar','pago','origen','t'])
+          && request.resource.data.fudo is string && request.resource.data.fudo.size() > 0 && request.resource.data.fudo.size() <= 12
+          && d == 'f' + request.resource.data.fudo
+          && request.resource.data.nombre is string && request.resource.data.nombre.size() <= 80
+          && request.resource.data.tel is string && request.resource.data.tel.size() <= 30
+          && request.resource.data.dir is string && request.resource.data.dir.size() > 0 && request.resource.data.dir.size() <= 200
+          && request.resource.data.total is number && request.resource.data.cobrar is number
+          && request.resource.data.pago is string && request.resource.data.pago.size() <= 120;
+      }
+
       // Posición en vivo de cada repartidor.
       match /pos/{k} {
         allow read: if isStaff(l);
