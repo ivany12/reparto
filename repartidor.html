@@ -6,6 +6,8 @@
 <meta name="theme-color" content="#000000">
 <title>Shivos Reparto</title>
 <link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <style>
 @font-face{font-family:'HighVoltage';src:url(hv.woff2) format('woff2');font-weight:400;font-display:swap}
 :root{--bg:#000;--ink:#fff;--mute:#b3b3b3;--acc:#F1BB00;--on-acc:#000;--panel:#111;--panel2:#1b1b1b;--line:#303030;--ok:#4cd27a;--warn:#ff8a5c;
@@ -51,12 +53,30 @@ h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spa
 .muted{color:var(--mute)}
 .toast{position:fixed;left:50%;bottom:calc(100px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#fff;color:#000;border-radius:12px;padding:10px 14px;display:flex;gap:14px;align-items:center;font-weight:600;z-index:9}
 .toast button{background:none;border:0;font-weight:800;text-decoration:underline;cursor:pointer;color:#000}
+.navwrap{position:relative;flex:none;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#0b0b0b}
+.navbar{display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--acc);color:var(--on-acc)}
+.navbar .na{flex:none;font-size:34px;line-height:1;width:40px;text-align:center}
+.navbar .nt{flex:1;min-width:0;display:flex;flex-direction:column}
+.navbar .nt b{font-family:var(--display);font-weight:400;font-size:28px;line-height:1}
+.navbar .nt span{font-size:15px;font-weight:600;overflow-wrap:anywhere}
+.navbar .chip{flex:none;background:#000;color:#fff;border-color:#000}
+#navmap{height:min(46vh,380px);min-height:240px;background:#0b0b0b}
+.leaflet-container{background:#0b0b0b;font-family:var(--body)}
+.osm-dark .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.5)}
+.ncen{position:absolute;right:10px;bottom:22px;z-index:600;min-height:40px;font-size:14px}
+.mk-dest{width:40px;height:40px;border-radius:50%;background:var(--acc);display:grid;place-items:center;border:3px solid #000}.mk-dest svg{width:22px;height:22px}
+.mk-stop{width:28px;height:28px;border-radius:50%;background:#fff;color:#000;display:grid;place-items:center;font-weight:800;border:2px solid #000}
+.mk-me{width:44px;height:44px;display:grid;place-items:center}.mk-me .dot{width:30px;height:30px;border-radius:50%;background:var(--acc);border:3px solid #fff;display:grid;place-items:center;box-shadow:0 0 0 3px rgba(0,0,0,.5)}.mk-me .dot svg{width:16px;height:16px}
 </style>
 </head>
 <body>
 <div id="app"><div class="center"><p class="muted">Cargando…</p></div></div>
 <script src="config.js"></script>
 <script src="geo.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
+<script src="map.js"></script>
 <script type="module">
 import { ref, col, getDoc, setDoc, updateDoc, onSnapshot, query, where, deleteField, keyOf, login, onUser, logout } from './fb.js';
 const $app = document.getElementById('app');
@@ -226,6 +246,110 @@ const mapsQ = o => o.dir ? o.dir + ', Buenos Aires, Argentina' : (o.geo ? o.geo.
 const navUrl = o => 'https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination=' + encodeURIComponent(mapsQ(o));
 const routeUrl = s => { const p = s.slice(0, 10), last = p[p.length - 1], mid = p.slice(0, -1).map(mapsQ).join('|');
   return 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(mapsQ(last)) + (mid ? '&waypoints=' + encodeURIComponent(mid) : ''); };
+
+/* ── mapa de navegación dentro de la app (la app queda abierta, así el GPS no se corta) ── */
+const ARROW = '<svg viewBox="0 0 16 16"><path d="M8 1L14 14L8 11L2 14Z" fill="#000"/></svg>';
+const HOUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11L12 3L21 11M6 9.5V21H18V9.5"/></svg>';
+const navWrap = document.createElement('div'); navWrap.className = 'navwrap';
+navWrap.innerHTML = '<div class="navbar"><span class="na">↑</span><div class="nt"><b class="nd"></b><span class="nx"></span></div><button class="chip nvoz" type="button"></button></div><div id="navmap"></div><button class="btn ncen" type="button">Ver ruta</button>';
+const nq = c => navWrap.querySelector(c);
+let nmap = null, meM = null, routeLine = null, route = null, stepIdx = 1, follow = true, fetching = false, lastFetch = 0, voz = ls.get('rep_voz') !== '0';
+const destMs = {}, spoken = new Set();
+const nicon = (html, size) => L.divIcon({ html, className: '', iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+function setVoz(on, speakIt) { voz = on; ls.set('rep_voz', on ? '1' : '0'); nq('.nvoz').textContent = on ? 'Voz: sí' : 'Voz: no'; if (on && speakIt) hablar('Voz activada'); if (!on && window.speechSynthesis) speechSynthesis.cancel(); }
+function hablar(t) { try { if (!voz || !window.speechSynthesis) return; const u = new SpeechSynthesisUtterance(t); u.lang = 'es-AR'; speechSynthesis.cancel(); speechSynthesis.speak(u); } catch { } }
+nq('.nvoz').onclick = () => setVoz(!voz, true); setVoz(voz, false);
+nq('.ncen').onclick = () => {
+  if (!nmap) return;
+  if (follow) { follow = false; nq('.ncen').textContent = 'Seguirme'; const s = stops(), pts = [pos, ...s.filter(o => o.geo)].filter(Boolean).map(p => [p.lat, p.lng]); if (pts.length > 1) nmap.fitBounds(pts, { padding: [40, 40], maxZoom: 17 }); }
+  else { follow = true; nq('.ncen').textContent = 'Ver ruta'; if (pos) nmap.setView([pos.lat, pos.lng], Math.max(nmap.getZoom(), 16)); }
+};
+function ensureMap() {
+  if (nmap || !window.L) return;
+  try {
+    const b = LOC && LOC.base && isFinite(LOC.base.lat) ? LOC.base : { lat: -34.6037, lng: -58.3816 };
+    nmap = L.map(nq('#navmap'), { zoomControl: false, attributionControl: true }).setView([pos ? pos.lat : b.lat, pos ? pos.lng : b.lng], 16);
+    baseMap(nmap); nmap.attributionControl.setPrefix(false);
+    nmap.on('dragstart', () => { if (follow) { follow = false; nq('.ncen').textContent = 'Seguirme'; } });
+  } catch (e) { console.error(e); nmap = null; navWrap.querySelector('#navmap').hidden = true; }
+}
+function segProj(p, a, b) {
+  const k = Math.cos(p.lat * Math.PI / 180), R = 111320;
+  const ax = (a[1] - p.lng) * k * R, ay = (a[0] - p.lat) * R, bx = (b[1] - p.lng) * k * R, by = (b[0] - p.lat) * R, dx = bx - ax, dy = by - ay, L2 = (dx * dx + dy * dy) || 1;
+  const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2));
+  return { d: Math.hypot(ax + t * dx, ay + t * dy), t, len: Math.sqrt(L2) };
+}
+/* Distancia de p a la ruta y metros ya recorridos sobre ella. */
+function onRoute(p, rt) {
+  let best = { d: 1e9, at: 0 };
+  for (let i = 1; i < rt.coords.length; i++) { const q = segProj(p, rt.coords[i - 1], rt.coords[i]); if (q.d < best.d) best = { d: q.d, at: rt.cum[i - 1] + q.t * q.len }; }
+  return best;
+}
+const DIRS = { 'left': 'a la izquierda', 'right': 'a la derecha', 'slight left': 'levemente a la izquierda', 'slight right': 'levemente a la derecha', 'sharp left': 'cerrado a la izquierda', 'sharp right': 'cerrado a la derecha' };
+const ARR = { 'left': '←', 'right': '→', 'slight left': '↖', 'slight right': '↗', 'sharp left': '↙', 'sharp right': '↘', 'straight': '↑', 'uturn': '↶' };
+function say(st) {
+  const m = st.maneuver || {}, n = st.name ? ' por ' + st.name : '', mod = m.modifier || 'straight';
+  if (m.type === 'arrive') return { a: '⚑', t: 'Llegás a destino' };
+  if (/roundabout|rotary/.test(m.type)) return { a: '↻', t: 'En la rotonda, salida ' + (m.exit || '') + n };
+  if (mod === 'uturn') return { a: '↶', t: 'Hacé la vuelta en U' + n };
+  if (mod === 'straight' || m.type === 'continue' || m.type === 'new name') return { a: '↑', t: 'Seguí derecho' + n };
+  return { a: ARR[mod] || '↑', t: 'Girá ' + (DIRS[mod] || '') + n };
+}
+async function fetchRoute(cur) {
+  fetching = true; lastFetch = Date.now();
+  try {
+    const u = 'https://router.project-osrm.org/route/v1/driving/' + pos.lng + ',' + pos.lat + ';' + cur.geo.lng + ',' + cur.geo.lat + '?overview=full&geometries=geojson&steps=true';
+    const j = await (await fetch(u)).json(), rt = j.routes && j.routes[0];
+    if (!rt) throw new Error('sin ruta');
+    route = { id: cur.id, t: Date.now(), coords: rt.geometry.coordinates.map(c => [c[1], c[0]]), steps: rt.legs[0].steps, dist: rt.distance, dur: rt.duration };
+    route.cum = [0]; for (let i = 1; i < route.coords.length; i++) route.cum.push(route.cum[i - 1] + GEO.dist({ lat: route.coords[i - 1][0], lng: route.coords[i - 1][1] }, { lat: route.coords[i][0], lng: route.coords[i][1] }));
+    route.stepAt = []; let acc = 0; route.steps.forEach(st => { route.stepAt.push(acc); acc += st.distance; });
+    stepIdx = 1; spoken.clear();
+    if (nmap) { if (routeLine) routeLine.remove(); routeLine = L.polyline(route.coords, { color: getComputedStyle(document.documentElement).getPropertyValue('--acc').trim() || '#F1BB00', weight: 6, opacity: .95, lineCap: 'round', lineJoin: 'round' }).addTo(nmap); }
+  } catch (e) { console.warn('ruta', e); }
+  fetching = false; updateNav();
+}
+function updateNav() {
+  const s = stops(), cur = s[0];
+  if (!cur || !navWrap.isConnected) return;
+  const bar = { a: nq('.na'), d: nq('.nd'), x: nq('.nx') };
+  if (nmap) {
+    if (pos) {
+      if (!meM) meM = L.marker([pos.lat, pos.lng], { icon: nicon('<div class="mk-me"><div class="dot">' + ARROW + '</div></div>', 44), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(nmap);
+      else meM.setLatLng([pos.lat, pos.lng]);
+      const dot = meM.getElement() && meM.getElement().querySelector('.dot'); if (dot) dot.style.transform = 'rotate(' + (pos.hdg || 0) + 'deg)';
+      if (follow) nmap.setView([pos.lat, pos.lng], Math.max(nmap.getZoom(), 16), { animate: false });
+    }
+    s.forEach((o, i) => {
+      if (!o.geo) return;
+      const html = i === 0 ? '<div class="mk-dest">' + HOUSE + '</div>' : '<div class="mk-stop">' + (i + 1) + '</div>', sz = i === 0 ? 40 : 28, key = o.id + (i === 0 ? 'c' : 'n');
+      if (destMs[o.id] && destMs[o.id].key !== key) { destMs[o.id].m.remove(); delete destMs[o.id]; }
+      if (!destMs[o.id]) destMs[o.id] = { key, m: L.marker([o.geo.lat, o.geo.lng], { icon: nicon(html, sz), interactive: false, keyboard: false }).addTo(nmap) };
+    });
+    Object.keys(destMs).forEach(id => { if (!s.some(o => o.id === id)) { destMs[id].m.remove(); delete destMs[id]; } });
+  }
+  if (!pos) { bar.a.textContent = '…'; bar.d.textContent = 'Buscando GPS'; bar.x.textContent = 'Un momento'; return; }
+  if (!cur.geo) { bar.a.textContent = '?'; bar.d.textContent = 'Sin ubicar'; bar.x.textContent = 'No encuentro esa dirección en el mapa. Usá «Ir con Google Maps».'; return; }
+  const prog = route && route.id === cur.id ? onRoute(pos, route) : null, off = !!prog && prog.d > 80;
+  if (route && route.id !== cur.id) route = null;
+  if (!fetching && (!route || off) && Date.now() - lastFetch > 15000) fetchRoute(cur);
+  if (!route) { const d = GEO.dist(pos, cur.geo); bar.a.textContent = '↑'; bar.d.textContent = d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d / 10) * 10 + ' m'; bar.x.textContent = 'Calculando ruta…'; return; }
+  while (stepIdx < route.steps.length - 1 && route.stepAt[stepIdx] < prog.at - 20) stepIdx++;
+  const st = route.steps[stepIdx], sy = say(st), d = Math.max(0, route.stepAt[stepIdx] - prog.at);
+  bar.a.textContent = sy.a;
+  bar.d.textContent = d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.max(10, Math.round(d / 10) * 10) + ' m';
+  bar.x.textContent = sy.t;
+  if (d < 180 && !spoken.has(stepIdx + 'a') && d >= 45) { spoken.add(stepIdx + 'a'); hablar('En ' + Math.round(d / 10) * 10 + ' metros, ' + sy.t); }
+  if (d < 45 && !spoken.has(stepIdx + 'b')) { spoken.add(stepIdx + 'b'); spoken.add(stepIdx + 'a'); hablar(sy.t); }
+}
+function attachNav() {
+  const slot = document.getElementById('mapslot');
+  if (!slot) return;
+  if (navWrap.parentNode !== slot) slot.appendChild(navWrap);
+  ensureMap();
+  if (nmap) setTimeout(() => nmap.invalidateSize(), 0);
+  updateNav();
+}
 function render() {
   if (!ME) return;
   const s = stops(), cur = s[0];
@@ -249,7 +373,7 @@ function render() {
       : gps === 'ok' && !lock ? '<div class="banner">Dejá esta pantalla abierta y prendida mientras repartís. Si cambiás de app o apagás la pantalla, el cliente deja de ver la moto.</div>' : '';
     const ruta = s.length > 1 ? '<a class="btn" href="' + esc(routeUrl(s)) + '" target="_blank" rel="noopener">Ruta completa en Google Maps (' + Math.min(s.length, 10) + ' paradas)</a>' : '';
     const hint = '<div class="cm">Mientras Google Maps está abierto, el cliente no ve la moto en vivo. Al llegar, volvé a esta app y tocá «Llegué».</div>';
-    body = '<div class="scroll">' + warn + ruta + hint + s.map((o, i) => {
+    body = '<div class="scroll">' + warn + '<div id="mapslot"></div>' + ruta + hint + s.map((o, i) => {
       const on = i === 0, cobrar = +o.cobrar || 0;
       return '<div class="card' + (on ? ' on' : '') + '"><div class="ct"><div class="num">' + (i + 1) + '</div><div class="cb"><span class="cn">' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' +
         '<span class="cm"><span>Pedido #' + o.num + '</span>' + (o.nota ? '<span>' + esc(o.nota) + '</span>' : '') + '</span></div>' +
@@ -260,13 +384,14 @@ function render() {
     act = '<div class="act"><button class="go ' + (got ? 'ok' : '') + '" id="go">' + (got ? 'Entregado ✓' : 'Llegué a ' + esc(cur.nombre || 'destino')) + '</button></div>';
   }
   const html = head + body + act;
-  if (html === render.last) return; // no tocamos el DOM si no cambió nada visible: así no se pierden toques
+  if (html === render.last) { updateNav(); return; } // no tocamos el DOM si no cambió nada visible: así no se pierden toques
   $app.innerHTML = html; render.last = html;
   const w = document.getElementById('who'); if (w) w.onclick = logout;
   document.querySelectorAll('[data-first]').forEach(b => b.onclick = () => primero(orders.find(x => x.id === b.dataset.first)));
   document.querySelectorAll('[data-pick]').forEach(c => c.onchange = () => { c.checked ? quitados.delete(c.dataset.pick) : quitados.add(c.dataset.pick); render(); });
   ['salir', 'salir2'].forEach(id => { const b = document.getElementById(id); if (b) b.onclick = salir; });
   const g = document.getElementById('go'); if (g) g.onclick = () => { const o = stops()[0]; o.llegoT ? entregado(o) : llego(o); };
+  attachNav();
 }
 setInterval(() => { if (ME) render(); }, 15000);
 </script>
