@@ -81,18 +81,18 @@
     }
     return null;
   }
-  /* Filas de las tablas "En preparación" y "Listo para entregar" de la pantalla Delivery (columnas por nombre de encabezado). */
+  /* Filas de las tablas "En preparación", "Listo para entregar" y "Enviados" de la pantalla Delivery (columnas por nombre de encabezado). */
   function parseFilas(doc) {
     const out = [];
     doc.querySelectorAll('table').forEach(t => {
-      if (!/tint-delivery-(preparing|ready-to-deliver)/.test(t.className)) return;
+      if (!/tint-delivery-(preparing|ready-to-deliver|sent)/.test(t.className)) return;
       const heads = [...t.querySelectorAll('thead th')].map(x => nrm(x.textContent));
       const ix = n => heads.indexOf(nrm(n));
       t.querySelectorAll('tbody tr').forEach(tr => {
         const th = tr.querySelector('th.col-id, th'); if (!th || tr.classList.contains('empty')) return;
         const id = (th.textContent.match(/\d+/) || [])[0]; if (!id) return;
         const cells = [...tr.children], g = n => { const i = ix(n); return i >= 0 && cells[i] ? cells[i].textContent.replace(/\s+/g, ' ').trim() : ''; };
-        out.push({ id, el: tr, hora: g('hora inicio'), dirRaw: g('dirección'), dir: partirDir(g('dirección')).dir, tel: g('teléfono'), cliente: g('cliente'), rep: g('repartidor'), depto: partirDir(g('dirección')).depto, total: money(g('total')) || 0, tabla: /ready/.test(t.className) ? 'listo' : 'prep' });
+        out.push({ id, el: tr, hora: g('hora inicio'), dirRaw: g('dirección'), dir: partirDir(g('dirección')).dir, tel: g('teléfono'), cliente: g('cliente'), rep: g('repartidor'), depto: partirDir(g('dirección')).depto, total: money(g('total')) || 0, tabla: /ready/.test(t.className) ? 'listo' : /-sent/.test(t.className) ? 'enviado' : 'prep' });
       });
     });
     return out;
