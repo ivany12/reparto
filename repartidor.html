@@ -60,10 +60,20 @@ h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spa
 .navbar .nt b{font-family:var(--display);font-weight:400;font-size:28px;line-height:1}
 .navbar .nt span{font-size:15px;font-weight:600;overflow-wrap:anywhere}
 .navbar .chip{flex:none;background:#000;color:#fff;border-color:#000}
+.nmapbox{position:relative}
 #navmap{height:min(46vh,380px);min-height:240px;background:#0b0b0b}
+.nfoot,.nclose{display:none}
+.navwrap.full{position:fixed;inset:0;z-index:3000;border:0;border-radius:0;display:flex;flex-direction:column;background:#000}
+.navwrap.full .navbar{padding-top:calc(10px + env(safe-area-inset-top,0px));padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px))}
+.navwrap.full .nmapbox{flex:1;min-height:0}
+.navwrap.full #navmap{position:absolute!important;inset:0;height:auto!important;min-height:0}
+.navwrap.full .nclose{display:inline-flex}
+.navwrap.full .nfoot{display:flex;flex-direction:column;gap:8px;padding:10px max(12px,env(safe-area-inset-left,0px)) calc(12px + env(safe-area-inset-bottom,0px));background:#000;border-top:1px solid var(--line)}
+.nfoot .ninfo{font-size:15px;overflow-wrap:anywhere}
+.nfoot .go{min-height:60px;font-size:24px}
 .leaflet-container{background:#0b0b0b;font-family:var(--body)}
 .osm-dark .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.5)}
-.ncen{position:absolute;right:10px;bottom:22px;z-index:600;min-height:40px;font-size:14px}
+.ncen{position:absolute;right:10px;bottom:24px;z-index:600;min-height:40px;font-size:14px}
 .mk-dest{width:40px;height:40px;border-radius:50%;background:var(--acc);display:grid;place-items:center;border:3px solid #000}.mk-dest svg{width:22px;height:22px}
 .mk-stop{width:28px;height:28px;border-radius:50%;background:#fff;color:#000;display:grid;place-items:center;font-weight:800;border:2px solid #000}
 .mk-me{width:44px;height:44px;display:grid;place-items:center}.mk-me .dot{width:30px;height:30px;border-radius:50%;background:var(--acc);border:3px solid #fff;display:grid;place-items:center;box-shadow:0 0 0 3px rgba(0,0,0,.5)}.mk-me .dot svg{width:16px;height:16px}
@@ -251,7 +261,7 @@ const routeUrl = s => { const p = s.slice(0, 10), last = p[p.length - 1], mid = 
 const ARROW = '<svg viewBox="0 0 16 16"><path d="M8 1L14 14L8 11L2 14Z" fill="#000"/></svg>';
 const HOUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11L12 3L21 11M6 9.5V21H18V9.5"/></svg>';
 const navWrap = document.createElement('div'); navWrap.className = 'navwrap';
-navWrap.innerHTML = '<div class="navbar"><span class="na">↑</span><div class="nt"><b class="nd"></b><span class="nx"></span></div><button class="chip nvoz" type="button"></button></div><div id="navmap"></div><button class="btn ncen" type="button">Ver ruta</button>';
+navWrap.innerHTML = '<div class="navbar"><span class="na">↑</span><div class="nt"><b class="nd"></b><span class="nx"></span></div><button class="chip nvoz" type="button"></button><button class="chip nclose" type="button" aria-label="Cerrar mapa">✕</button></div><div class="nmapbox"><div id="navmap"></div><button class="btn ncen" type="button">Ver ruta</button></div><div class="nfoot"><div class="ninfo"></div><button class="go ngo" type="button"></button></div>';
 const nq = c => navWrap.querySelector(c);
 let nmap = null, meM = null, routeLine = null, route = null, stepIdx = 1, follow = true, fetching = false, lastFetch = 0, voz = ls.get('rep_voz') !== '0';
 const destMs = {}, spoken = new Set();
@@ -259,6 +269,18 @@ const nicon = (html, size) => L.divIcon({ html, className: '', iconSize: [size, 
 function setVoz(on, speakIt) { voz = on; ls.set('rep_voz', on ? '1' : '0'); nq('.nvoz').textContent = on ? 'Voz: sí' : 'Voz: no'; if (on && speakIt) hablar('Voz activada'); if (!on && window.speechSynthesis) speechSynthesis.cancel(); }
 function hablar(t) { try { if (!voz || !window.speechSynthesis) return; const u = new SpeechSynthesisUtterance(t); u.lang = 'es-AR'; speechSynthesis.cancel(); speechSynthesis.speak(u); } catch { } }
 nq('.nvoz').onclick = () => setVoz(!voz, true); setVoz(voz, false);
+/* Pantalla completa (como Google Maps): se abre tocando el mapa. Mientras está abierta el mapa vive en <body>, fuera del #app que se redibuja. */
+let full = false;
+function setFull(on) {
+  if (on === full) return;
+  full = on; navWrap.classList.toggle('full', on);
+  if (on) { document.body.appendChild(navWrap); try { history.pushState({ nav: 1 }, ''); } catch { } }
+  else { render.last = null; render(); }
+  setTimeout(() => { if (nmap) nmap.invalidateSize(); updateNav(); }, 80);
+}
+nq('.nclose').onclick = () => { if (history.state && history.state.nav) history.back(); else setFull(false); };
+window.addEventListener('popstate', () => { if (full) setFull(false); });
+nq('.ngo').onclick = () => { const o = stops()[0]; if (o) o.llegoT ? entregado(o) : llego(o); };
 nq('.ncen').onclick = () => {
   if (!nmap) return;
   if (follow) { follow = false; nq('.ncen').textContent = 'Seguirme'; const s = stops(), pts = [pos, ...s.filter(o => o.geo)].filter(Boolean).map(p => [p.lat, p.lng]); if (pts.length > 1) nmap.fitBounds(pts, { padding: [40, 40], maxZoom: 17 }); }
@@ -270,6 +292,7 @@ function ensureMap() {
     const b = LOC && LOC.base && isFinite(LOC.base.lat) ? LOC.base : { lat: -34.6037, lng: -58.3816 };
     nmap = L.map(nq('#navmap'), { zoomControl: false, attributionControl: true }).setView([pos ? pos.lat : b.lat, pos ? pos.lng : b.lng], 16);
     baseMap(nmap); nmap.attributionControl.setPrefix(false);
+    nmap.on('click', () => { if (!full) setFull(true); });
     nmap.on('dragstart', () => { if (follow) { follow = false; nq('.ncen').textContent = 'Seguirme'; } });
   } catch (e) { console.error(e); nmap = null; navWrap.querySelector('#navmap').hidden = true; }
 }
@@ -313,6 +336,8 @@ function updateNav() {
   const s = stops(), cur = s[0];
   if (!cur || !navWrap.isConnected) return;
   const bar = { a: nq('.na'), d: nq('.nd'), x: nq('.nx') };
+  nq('.ninfo').textContent = cur.nombre + ' · ' + cur.dir + (cur.depto ? ' · ' + cur.depto : '') + ((+cur.cobrar || 0) > 0 ? ' · Cobrar ' + money(cur.cobrar) : '');
+  const goB = nq('.ngo'); goB.textContent = cur.llegoT ? 'Entregado ✓' : 'Llegué a ' + (cur.nombre || 'destino'); goB.classList.toggle('ok', !!cur.llegoT);
   if (nmap) {
     if (pos) {
       if (!meM) meM = L.marker([pos.lat, pos.lng], { icon: nicon('<div class="mk-me"><div class="dot">' + ARROW + '</div></div>', 44), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(nmap);
@@ -344,6 +369,7 @@ function updateNav() {
 }
 function attachNav() {
   const slot = document.getElementById('mapslot');
+  if (full) { updateNav(); return; }
   if (!slot) return;
   if (navWrap.parentNode !== slot) slot.appendChild(navWrap);
   ensureMap();
@@ -353,6 +379,7 @@ function attachNav() {
 function render() {
   if (!ME) return;
   const s = stops(), cur = s[0];
+  if (full && !s.length) { full = false; navWrap.classList.remove('full'); navWrap.remove(); }
   const gpsChip = { ok: ['ok', 'GPS activo'], wait: ['warn', 'Buscando GPS…'], denied: ['warn', 'GPS sin permiso'], no: ['warn', 'Sin GPS'], idle: ['', 'GPS en espera'] }[gps];
   const head = '<header class="rh"><span class="wm">' + esc(LOC.nombre || 'Shivo\'s') + '</span><span class="rt">Reparto</span><span class="sp"></span>' +
     '<span class="chip ' + gpsChip[0] + '"><i></i>' + gpsChip[1] + '</span><button class="chip" id="who" aria-label="Salir">' + esc(ME) + '</button></header>';
@@ -372,7 +399,7 @@ function render() {
     const warn = gps === 'denied' ? '<div class="banner">Activá la ubicación de este navegador para que el cliente vea la moto: Ajustes del celu, Safari o Chrome, Ubicación, Permitir.</div>'
       : gps === 'ok' && !lock ? '<div class="banner">Dejá esta pantalla abierta y prendida mientras repartís. Si cambiás de app o apagás la pantalla, el cliente deja de ver la moto.</div>' : '';
     const ruta = s.length > 1 ? '<a class="btn" href="' + esc(routeUrl(s)) + '" target="_blank" rel="noopener">Ruta completa en Google Maps (' + Math.min(s.length, 10) + ' paradas)</a>' : '';
-    const hint = '<div class="cm">Mientras Google Maps está abierto, el cliente no ve la moto en vivo. Al llegar, volvé a esta app y tocá «Llegué».</div>';
+    const hint = '<div class="cm">Tocá el mapa para verlo en pantalla completa. Mientras Google Maps está abierto, el cliente no ve la moto en vivo. Al llegar, volvé a esta app y tocá «Llegué».</div>';
     body = '<div class="scroll">' + warn + '<div id="mapslot"></div>' + ruta + hint + s.map((o, i) => {
       const on = i === 0, cobrar = +o.cobrar || 0;
       return '<div class="card' + (on ? ' on' : '') + '"><div class="ct"><div class="num">' + (i + 1) + '</div><div class="cb"><span class="cn">' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' +
