@@ -62,13 +62,19 @@
     }
   }
 
+  /* Detalle del pedido + datos de la fila de la tabla (por si el detalle no trae algo). Si no se pudo leer el total del detalle se usa el de la tabla. */
+  function completar(p, r) {
+    const total = p.total || r.total || 0;
+    return { ...p, nombre: p.cliente || r.cliente, tel: p.tel || r.tel, depto: p.depto || r.depto, total, cobrar: Math.max(0, total - (p.pagado || 0)) };
+  }
+
   async function tick() {
     try {
       const now = Date.now();
       const filas = parseFilas(document).filter(r => esRep(r, REP) && !motivoFila(r, now));
       // 1) el detalle que la caja ya tiene abierto (solo si ese pedido tiene asignado el repartidor de Reparto)
       const open = panelId(), fo = open && filas.find(r => r.id === open.id);
-      if (open && fo && !motivoNo(open, now, true)) enviar({ ...open, nombre: open.cliente, tel: open.tel || fo.tel, depto: open.depto || fo.depto }, true);
+      if (open && fo && !motivoNo(open, now, true)) enviar(completar(open, fo), true);
       // 2) pedidos con el repartidor asignado en las tablas
       for (const r of filas) {
         if (S.sent[r.id] && /\|f$/.test(S.sent[r.id])) continue;
@@ -77,7 +83,7 @@
         if ((S.tries[r.id] || 0) < 3 && quiet()) {
           S.tries[r.id] = (S.tries[r.id] || 0) + 1;
           const p = await leerDetalle(r);
-          if (p && !motivoNo(p, now, true)) { enviar({ ...p, nombre: p.cliente || r.cliente, tel: p.tel || r.tel, depto: p.depto || r.depto }, true); continue; }
+          if (p && !motivoNo(p, now, true)) { enviar(completar(p, r), true); continue; }
         }
         if (!S.sent[r.id] && now - S.seen[r.id] > 25000) enviar({ id: r.id, nombre: r.cliente, tel: r.tel, dir: r.dir, depto: r.depto, total: r.total, cobrar: r.total, pago: 'Sin verificar', origen: '' }, false);
       }

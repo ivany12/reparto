@@ -29,30 +29,39 @@
     const id = L[i0].match(/#(\d+)/)[1];
     const F = {};
     let i = i0 + 1, fin = L.length;
-    for (let k = i; k < L.length; k++) if (/^ADICIONES$/i.test(L[k])) { fin = k; break; }
+    for (let k = i; k < L.length; k++) if (/^ADICION(ES|AR)$/i.test(L[k])) { fin = k; break; }
     for (; i < fin; i++) {
       if (!isLabel(L[i])) continue;
       const next = L[i + 1];
       F[labelKey(L[i])] = next === undefined || isLabel(next) || i + 1 >= fin ? '' : next;
     }
     // total y pagos (después de las adiciones)
-    let total = null; const pagos = [];
+    let total = null, vuelto = 0; const pagos = [];
     for (let k = fin; k < L.length; k++) {
-      if (/^Total:?$/i.test(L[k]) && total === null) total = money(L[k + 1]);
-      if (/^PAGOS?$/i.test(L[k])) {
+      if (/^Total:?(\s*\$.*)?$/i.test(L[k]) && total === null) total = money(L[k]) !== null ? money(L[k]) : money(L[k + 1]);
+      // En Fudo la sección se llama "PAGA CON" (antes se buscaba "PAGO"): "Qr $19.900,00", "Efectivo $25.000,00", "Vuelto: $5.100,00".
+      if (/^(PAGOS?|PAGA\s+CON)$/i.test(L[k])) {
         for (let j = k + 1; j < L.length; j++) {
-          if (money(L[j]) === null && money(L[j + 1]) !== null) { pagos.push({ metodo: L[j], monto: money(L[j + 1]) }); j++; }
-          else if (money(L[j]) === null && !/^(total|cambio|vuelto|propina)/i.test(L[j]) && j + 1 >= L.length) break;
+          if (/^detalles\s+del\s+env/i.test(L[j])) break;
+          // "Método $monto" en una sola línea, o método y monto en líneas separadas
+          let nom = null, monto = null;
+          const un = L[j].match(/^(.+?)\s*:?\s+(\$\s*[\d.]+(?:,\d{1,2})?)$/);
+          if (un) { nom = un[1]; monto = money(un[2]); }
+          else if (money(L[j]) === null && money(L[j + 1]) !== null) { nom = L[j]; monto = money(L[j + 1]); j++; }
+          if (nom === null) continue;
+          if (/^vuelto$/i.test(nom.replace(/:$/, '').trim())) vuelto = monto;
+          else if (!/^(total|cambio|propina)/i.test(nom)) pagos.push({ metodo: nom.replace(/:$/, '').trim(), monto });
         }
         break;
       }
     }
     const pagado = pagos.filter(p => !/efectivo/i.test(p.metodo)).reduce((a, p) => a + p.monto, 0);
+    const pagoTxt = pagos.map(p => p.metodo + ' $' + p.monto.toLocaleString('es-AR')).join(' · ') + (vuelto > 0 ? ' · vuelto $' + vuelto.toLocaleString('es-AR') : '');
     return {
       id, recepcion: F['Recepción'] || '', origen: F['Origen'] || '', tipo: F['Tipo'] || '', cliente: F['Cliente'] || '', tel: F['Teléfono'] || '',
       dirRaw: F['Dirección'] || '', dir: partirDir(F['Dirección']).dir, depto: partirDir(F['Dirección']).depto, estado: F['Estado'] || '', total: total || 0, pagos,
-      cobrar: Math.max(0, (total || 0) - pagado),
-      pago: pagos.length ? pagos.map(p => p.metodo + ' $' + p.monto.toLocaleString('es-AR')).join(' · ') : 'Sin pago registrado'
+      cobrar: Math.max(0, (total || 0) - pagado), pagado, vuelto,
+      pago: pagos.length ? pagoTxt : 'Sin pago registrado'
     };
   }
 
