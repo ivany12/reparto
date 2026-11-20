@@ -187,7 +187,7 @@ function start() {
   onSnapshot(ref(), s => { if (s.exists()) { LOC = s.data(); drawRiders(); drawMap(); } });
   onSnapshot(query(col('pedidos'), where('creado', '>=', startOfDay(1))), snap => { pedidos = []; snap.forEach(d => pedidos.push(d.data())); drawList(); drawMap(); }, err => toast('Sin conexión con la base: ' + err.code));
   onSnapshot(col('inbox'), snap => (snap.docChanges ? snap.docChanges() : []).forEach(ch => { if (ch.type !== 'removed') importarFudo(ch.doc.data(), ch.doc.id); }), () => { });
-  onSnapshot(col('pos'), snap => { posiciones = {}; snap.forEach(d => posiciones[d.id] = d.data()); drawRiders(); drawMap(); }, () => { });
+  onSnapshot(col('pos'), snap => { posiciones = {}; snap.forEach(d => posiciones[d.id] = d.data()); drawRiders(); drawList(); drawMap(); }, () => { });
   setInterval(() => { drawList(); drawRiders(); }, 30000);
 }
 const activos = () => pedidos.filter(o => o.estado === 'cocina' || o.estado === 'listo' || o.estado === 'camino');
@@ -220,6 +220,9 @@ function tiempos(o) {
 function card(o) {
   const cobrar = +o.cobrar || 0, sel = o.id === selId;
   const rider = o.repartidor ? '<span>🛵 ' + esc(o.repartidor) + (o.llegoT && o.estado === 'camino' ? ' · <b class="okc">llegó</b>' : '') + '</span>' : '';
+  // En camino pero sin señal de la moto (app cerrada, pantalla apagada o sin GPS): se avisa para llamarlo.
+  const pz = posiciones[keyOf(o.repartidorEmail || '')], sinSenal = o.estado === 'camino' && o.salio && Date.now() - o.salio > 60000 && !o.llegoT && (!pz || !pz.activo || Date.now() - pz.t > 90000);
+  const senal = sinSenal ? '<span class="cm"><span class="warn">Sin señal de la moto: pedile a ' + esc(o.repartidor || 'el repartidor') + ' que abra la app con la pantalla prendida</span></span>' : '';
   const link = o.linkEnviado ? '<span class="okc">Link enviado ✓</span>' : '<span class="warn">Link sin enviar</span>';
   const geo = o.geo ? (o.geo.aprox ? '<span class="warn">Ubicación aproximada: revisala en el mapa</span>' : '') : '<span class="warn">Sin ubicar en el mapa</span>';
   let acts = '';
@@ -236,6 +239,7 @@ function card(o) {
     '<span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' +
     '<span class="cm"><span>' + esc(o.tel) + '</span><span>hace ' + mins(o.creado) + ' min</span>' + rider + (o.fudo ? '<span>Fudo #' + esc(o.fudo) + '</span>' : '') + '</span>' +
     (o.pagoFudo ? '<span class="cm">Pago en Fudo: ' + esc(o.pagoFudo) + '</span>' : '') +
+    senal +
     (o.nota ? '<span class="cm">» ' + esc(o.nota) + '</span>' : '') + tiempos(o) +
     (o.estado !== 'entregado' && o.estado !== 'cancelado' ? '<span class="cm">' + link + geo + '</span>' : '') + '</div>' +
     '<span class="tag ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></div>' +

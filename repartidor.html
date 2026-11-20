@@ -131,6 +131,9 @@ function watchOrders() {
   // En camino con este repartidor.
   unsub.push(onSnapshot(query(col('pedidos'), where('repartidorEmail', '==', EMAIL), where('estado', '==', 'camino')), snap => {
     orders = []; snap.forEach(d => orders.push(d.data()));
+    // pedido nuevo que le asignaron solo (la caja lo marcó "Enviado" en Fudo): suena, vibra y avisa que deje la pantalla prendida
+    if (vistos === null) vistos = new Set(orders.map(o => o.id));
+    else { const nuevos = orders.filter(o => !vistos.has(o.id)); orders.forEach(o => vistos.add(o.id)); if (nuevos.length && Date.now() - salirT > 6000) avisar(nuevos); }
     sync();
   }, fail));
   // Listos para salir (los ve cualquier repartidor del local).
@@ -140,6 +143,21 @@ function watchOrders() {
     [...quitados].forEach(id => { if (!listos.some(o => o.id === id)) quitados.delete(id); });
     render();
   }, fail));
+}
+let vistos = null, aviso = null, salirT = 0;
+function beep() {
+  try {
+    const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+    const a = beep.a || (beep.a = new C()); a.resume && a.resume();
+    [0, 0.28, 0.56].forEach(d => { const o = a.createOscillator(), g = a.createGain(); o.frequency.value = 880; g.gain.value = 0.25; o.connect(g); g.connect(a.destination); o.start(a.currentTime + d); o.stop(a.currentTime + d + 0.18); });
+  } catch { }
+}
+function avisar(nuevos) {
+  try { navigator.vibrate && navigator.vibrate([300, 150, 300, 150, 300]); } catch { }
+  beep();
+  aviso = { t: Date.now(), txt: nuevos.length === 1 ? 'Pedido nuevo para ' + (nuevos[0].nombre || 'un cliente') + (nuevos[0].dir ? ' · ' + nuevos[0].dir : '') : nuevos.length + ' pedidos nuevos' };
+  setTimeout(() => { render(); }, 45500);
+  wake();
 }
 function stops() {
   const rank = id => { const i = order.indexOf(id); return i < 0 ? 1e9 : i; };
@@ -234,6 +252,7 @@ function entregado(o) {
   sync();
 }
 function salir() {
+  salirT = Date.now();
   const ids = listos.filter(o => !quitados.has(o.id));
   if (!ids.length) return;
   const t = Date.now(), base = orders.length;
@@ -420,8 +439,10 @@ function render() {
     body = '<div class="scroll">' + listosHtml + '</div>';
     act = '<div class="act"><button class="go" id="salir"' + (chosen.length ? '' : ' disabled') + '>Salir con ' + chosen.length + (chosen.length === 1 ? ' pedido' : ' pedidos') + '</button></div>';
   } else {
-    const warn = gps === 'denied' ? '<div class="banner">Activá la ubicación de este navegador para que el cliente vea la moto: Ajustes del celu, Safari o Chrome, Ubicación, Permitir.</div>'
-      : gps === 'ok' && !lock ? '<div class="banner">Dejá esta pantalla abierta y prendida mientras repartís. Si cambiás de app o apagás la pantalla, el cliente deja de ver la moto.</div>' : '';
+    const nuevo = aviso && Date.now() - aviso.t < 45000 ? '<div class="banner" style="border-color:#F1BB00;background:#2a2100;font-weight:700">🛵 ' + esc(aviso.txt) + '. Dejá esta pantalla abierta y prendida: el cliente ve la moto en vivo.</div>' : '';
+    const warn = nuevo + (gps === 'denied' ? '<div class="banner">Activá la ubicación de este navegador para que el cliente vea la moto: Ajustes del celu, Safari o Chrome, Ubicación, Permitir.</div>'
+      : gps === 'wait' ? '<div class="banner">Buscando señal GPS… Dejá la pantalla prendida: hasta que no la encuentre, el cliente no ve la moto.</div>'
+      : gps === 'ok' && !lock ? '<div class="banner">Dejá esta pantalla abierta y prendida mientras repartís. Si cambiás de app o apagás la pantalla, el cliente deja de ver la moto.</div>' : '');
     const ruta = s.length > 1 ? '<a class="btn" href="' + esc(routeUrl(s)) + '" target="_blank" rel="noopener">Ruta completa en Google Maps (' + Math.min(s.length, 10) + ' paradas)</a>' : '';
     const hint = '<div class="cm">Tocá el mapa para verlo en pantalla completa. Mientras Google Maps está abierto, el cliente no ve la moto en vivo. Al llegar, volvé a esta app y tocá «Llegué».</div>';
     body = '<div class="scroll">' + warn + '<div id="mapslot"></div>' + ruta + hint + s.map((o, i) => {
