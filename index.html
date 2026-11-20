@@ -60,6 +60,7 @@ h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spa
 .cn{font-weight:700;font-size:18px;overflow-wrap:anywhere}
 .cd{font-size:16px;overflow-wrap:anywhere}
 .cm{font-size:14px;color:var(--mute);display:flex;flex-wrap:wrap;gap:2px 12px}
+.tm b{color:var(--ink)}
 .tag{flex:none;font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding:4px 9px;border-radius:99px;border:1px solid var(--line);white-space:nowrap}
 .tag.cobrar{background:var(--warn);color:#000;border-color:var(--warn)}.tag.ok{color:var(--ok);border-color:var(--ok)}
 .row{display:flex;gap:8px;flex-wrap:wrap}
@@ -198,6 +199,20 @@ function drawRiders() {
 }
 
 /* ── lista ── */
+const hm = t => new Date(t).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+const dmin = (a, b) => Math.max(0, Math.round((b - a) / 60000));
+// Horarios solo para el panel (no los ve el cliente): salida del viaje, entrega y duraciones.
+function tiempos(o) {
+  if (o.estado !== 'camino' && o.estado !== 'entregado') return '';
+  const p = [];
+  if (o.salio) p.push('Salió <b>' + hm(o.salio) + '</b>');
+  if (o.llegoT) p.push('Llegó <b>' + hm(o.llegoT) + '</b>');
+  if (o.estado === 'entregado' && o.entregaT) p.push('Entregado <b>' + hm(o.entregaT) + '</b>');
+  if (o.estado === 'entregado' && o.salio && o.entregaT) p.push('viaje ' + dmin(o.salio, o.entregaT) + ' min');
+  if (o.estado === 'entregado' && o.creado && o.entregaT) p.push('total ' + dmin(o.creado, o.entregaT) + ' min');
+  if (o.estado === 'camino' && o.salio) p.push('hace ' + dmin(o.salio, Date.now()) + ' min en la calle');
+  return p.length ? '<span class="cm tm">' + p.map(x => '<span>' + x + '</span>').join('') + '</span>' : '';
+}
 function card(o) {
   const cobrar = +o.cobrar || 0, sel = o.id === selId;
   const rider = o.repartidor ? '<span>🛵 ' + esc(o.repartidor) + (o.llegoT && o.estado === 'camino' ? ' · <b class="okc">llegó</b>' : '') + '</span>' : '';
@@ -216,18 +231,22 @@ function card(o) {
   return '<div class="card' + (sel ? ' sel' : '') + '" data-card="' + o.id + '"><div class="ct"><div class="num">' + o.num + '</div><div class="cb"><span class="cn">' + esc(o.nombre) + '</span>' +
     '<span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' +
     '<span class="cm"><span>' + esc(o.tel) + '</span><span>hace ' + mins(o.creado) + ' min</span>' + rider + '</span>' +
-    (o.nota ? '<span class="cm">» ' + esc(o.nota) + '</span>' : '') +
+    (o.nota ? '<span class="cm">» ' + esc(o.nota) + '</span>' : '') + tiempos(o) +
     (o.estado !== 'entregado' && o.estado !== 'cancelado' ? '<span class="cm">' + link + geo + '</span>' : '') + '</div>' +
     '<span class="tag ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></div>' +
     (acts ? '<div class="row">' + acts + '</div>' : '') + '</div>';
 }
+function promViaje(l) {
+  const v = l.filter(o => o.salio && o.entregaT).map(o => dmin(o.salio, o.entregaT));
+  return v.length ? ' · viaje prom. ' + Math.round(v.reduce((a, b) => a + b, 0) / v.length) + ' min' : '';
+}
 function drawList() {
   const el = document.getElementById('list'); if (!el) return;
   const by = e => pedidos.filter(o => o.estado === e).sort((a, b) => a.creado - b.creado);
-  const sec = (t, l, empty, rev) => '<div class="sec"><h3>' + t + ' <small>' + l.length + '</small></h3>' + (l.length ? (rev ? l.slice().reverse() : l).map(card).join('') : '<p class="empty">' + empty + '</p>') + '</div>';
+  const sec = (t, l, empty, rev, extra) => '<div class="sec"><h3>' + t + ' <small>' + l.length + (extra || '') + '</small></h3>' + (l.length ? (rev ? l.slice().reverse() : l).map(card).join('') : '<p class="empty">' + empty + '</p>') + '</div>';
   const hoy = dayKey(Date.now()), ent = by('entregado').filter(o => dayKey(o.entregaT || o.creado) === hoy);
   const html = sec('Cocinando', by('cocina'), 'Sin pedidos en cocina.') + sec('Listos para despachar', by('listo'), 'Nada esperando repartidor.') +
-    sec('En camino', by('camino'), 'Nadie en la calle.') + sec('Entregados hoy', ent, 'Todavía no entregaste ninguno hoy.', true);
+    sec('En camino', by('camino'), 'Nadie en la calle.') + sec('Entregados hoy', ent, 'Todavía no entregaste ninguno hoy.', true, promViaje(ent));
   if (html === drawList.last) return;
   const sc = el.scrollTop; el.innerHTML = html; el.scrollTop = sc; drawList.last = html;
 }
@@ -250,6 +269,7 @@ const TRACK_ESTADO = { cocina: 'preparando', listo: 'listo', camino: 'camino', e
 function cambiar(o, estado, extra = {}) {
   const t = Date.now(), p = { estado, upd: t, ...extra };
   if (estado === 'entregado') p.entregaT = t;
+  if (estado === 'listo') p.listoT = t;
   updateDoc(ref('pedidos', o.id), p).catch(e => toast('No se pudo guardar: ' + e.code));
   if (o.track) updateDoc(ref('track', o.track), { estado: TRACK_ESTADO[estado], upd: t, ...(estado === 'entregado' || estado === 'cancelado' ? { antes: 0 } : {}) }).catch(() => { });
 }
