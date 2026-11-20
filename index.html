@@ -298,9 +298,9 @@ function crearPedido(f, x = {}) {
   const t = Date.now(), id = x.id || 'p' + t.toString(36) + Math.random().toString(36).slice(2, 5), tok = GEO.token(), hoy = dayKey(t);
   const num0 = pedidos.filter(o => dayKey(o.creado) === hoy).reduce((m, o) => Math.max(m, o.num || 0), 0) + 1;
   const num = Math.max(num0, crearPedido.u && crearPedido.u.d === hoy ? crearPedido.u.n + 1 : 0); crearPedido.u = { d: hoy, n: num }; // varios pedidos casi a la vez no repiten número
-  const o = { id, num, nombre: f.nombre, tel: f.tel, dir: f.dir, depto: f.depto, nota: f.nota, cobrar: f.cobrar, estado: 'cocina', track: tok, creado: t, upd: t, repartidor: '', repartidorEmail: '', linkEnviado: f.wa ? t : null, ...(f.geo ? { geo: f.geo } : {}), ...(x.fudo ? { fudo: x.fudo, pagoFudo: x.pago || '' } : {}) };
+  const o = { id, num, nombre: f.nombre, tel: f.tel, dir: f.dir, depto: f.depto, nota: f.nota, cobrar: f.cobrar, estado: x.listo ? 'listo' : 'cocina', track: tok, creado: t, upd: t, repartidor: '', repartidorEmail: '', linkEnviado: f.wa ? t : null, ...(x.listo ? { listoT: t } : {}), ...(f.geo ? { geo: f.geo } : {}), ...(x.fudo ? { fudo: x.fudo, pagoFudo: x.pago || '' } : {}) };
   setDoc(ref('pedidos', id), o).catch(e => toast('No se pudo guardar: ' + e.code));
-  setDoc(ref('track', tok), { tok, pedidoId: id, num, nombre: GEO.firstName(f.nombre), dir: f.dir + (f.depto ? ' · ' + f.depto : ''), estado: 'preparando', local: LOC.nombre || '', tel: LOC.tel || '', color: LOC.color || '', antes: 0, upd: t, ...(f.geo ? { dest: { lat: f.geo.lat, lng: f.geo.lng } } : {}) }).catch(() => { });
+  setDoc(ref('track', tok), { tok, pedidoId: id, num, nombre: GEO.firstName(f.nombre), dir: f.dir + (f.depto ? ' · ' + f.depto : ''), estado: x.listo ? 'listo' : 'preparando', local: LOC.nombre || '', tel: LOC.tel || '', color: LOC.color || '', antes: 0, upd: t, ...(f.geo ? { dest: { lat: f.geo.lat, lng: f.geo.lng } } : {}) }).catch(() => { });
   if (f.wa) window.open(waUrl(o), '_blank'); // síncrono dentro del toque, para que el navegador no lo bloquee
   if (!f.geo) geocodificar(id, tok, f.dir);
   toast(x.fudo ? 'Pedido #' + num + ' llegó desde Fudo (' + f.nombre + ')' : 'Pedido #' + num + ' cargado' + (f.wa ? ': tocá enviar en WhatsApp' : ''));
@@ -318,14 +318,18 @@ async function importarFudo(x, docId) {
     const f = { nombre: String(x.nombre || 'Cliente'), tel: String(x.tel || ''), dir: String(x.dir || ''), depto: String(x.depto || ''), nota: '', cobrar: Math.max(0, Math.round(+x.cobrar || 0)), wa: false, geo: null };
     if (cur.exists()) {
       const o = cur.data();
-      if (o.estado === 'cocina' || o.estado === 'listo') { editarPedido(o, { ...f, depto: f.depto || o.depto || '', nota: o.nota || '', geo: null }); updateDoc(ref('pedidos', id), { pagoFudo: x.pago || '' }).catch(() => { }); }
+      if (o.estado === 'cocina' || o.estado === 'listo') {
+        editarPedido(o, { ...f, depto: f.depto || o.depto || '', nota: o.nota || '', geo: null });
+        updateDoc(ref('pedidos', id), { pagoFudo: x.pago || '' }).catch(() => { });
+        if (x.listo && o.estado === 'cocina') { cambiar(o, 'listo'); toast('Pedido #' + o.num + ' listo (marcado en Fudo)'); } // en Fudo lo pasaron a "Listo para entregar"
+      }
     } else {
       let g = null;
       try {
         const r = await GEO.search(f.dir, zona()), e = r.find(c => c.exact) || r[0];
         if (e) g = { lat: e.lat, lng: e.lng, src: e.src, ...(e.exact ? {} : { aprox: true }) };
       } catch { }
-      crearPedido({ ...f, geo: g }, { id, fudo: x.fudo, pago: x.pago });
+      crearPedido({ ...f, geo: g }, { id, fudo: x.fudo, pago: x.pago, listo: x.listo === true });
     }
     await deleteDoc(ref('inbox', docId));
   } catch (e) { console.error('Fudo', e); importando.delete(k); }

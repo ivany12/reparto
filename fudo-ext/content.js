@@ -8,10 +8,14 @@
   let REP = 'MOTOO'; // nombre del repartidor en Fudo que significa "este pedido va a Reparto"
   chrome.storage.local.get('repartidor').then(r => { if (r.repartidor) REP = r.repartidor; }).catch(() => { });
   chrome.storage.onChanged.addListener(ch => { if (ch.repartidor) REP = ch.repartidor.newValue || 'MOTOO'; });
-  const S = { sent: {}, seen: {}, tries: {}, busy: false, lastInput: 0, own: false, last: null };
+  const S = { sent: {}, data: {}, seen: {}, tries: {}, busy: false, lastInput: 0, own: false, last: null };
   const store = chrome.storage.local;
-  store.get('sent').then(r => { S.sent = r.sent || {}; }).catch(() => { });
-  const save = () => { const keys = Object.keys(S.sent); if (keys.length > 300) keys.slice(0, keys.length - 300).forEach(k => delete S.sent[k]); store.set({ sent: S.sent }).catch(() => { }); };
+  store.get(['sent', 'data']).then(r => { S.sent = r.sent || {}; S.data = r.data || {}; }).catch(() => { });
+  // sent[id] = huella de lo último enviado; data[id] = ese pedido completo (para avisar "listo" sin volver a leer el detalle)
+  const save = () => {
+    for (const o of [S.sent, S.data]) { const keys = Object.keys(o); if (keys.length > 300) keys.slice(0, keys.length - 300).forEach(k => delete o[k]); }
+    store.set({ sent: S.sent, data: S.data }).catch(() => { });
+  };
   ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel'].forEach(ev => addEventListener(ev, () => { if (!S.own) S.lastInput = Date.now(); }, true));
 
   /* cartelito abajo a la izquierda */
@@ -20,14 +24,16 @@
     if (!badge) {
       badge = document.createElement('div'); badge.id = 'shivos-reparto-badge';
       badge.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2147483647;font:600 13px/1.3 system-ui,Segoe UI,sans-serif;padding:8px 12px;border-radius:10px;box-shadow:0 2px 10px #0006;cursor:pointer;max-width:340px;display:none';
-      badge.title = 'Shivos Reparto · tocá para reenviar el último pedido';
-      badge.onclick = () => { if (S.last) { delete S.sent[S.last]; save(); say('ok', 'Reenviando #' + S.last + '…'); } };
+      badge.title = 'Shivos Reparto activo · tocá para reenviar el último pedido';
+      badge.onclick = () => { const pd = S.last && S.data[S.last]; if (pd) { delete S.sent[S.last]; say('ok', 'Reenviando #' + S.last + '…'); enviar({ ...pd, id: pd.fudo }, true); } };
       document.body.appendChild(badge);
     }
     const c = { ok: ['#F1BB00', '#000'], warn: ['#ff8a5c', '#000'], err: ['#e5484d', '#fff'] }[kind];
-    badge.style.background = c[0]; badge.style.color = c[1]; badge.textContent = '🛵 Reparto: ' + text; badge.style.display = 'block';
-    clearTimeout(bt); if (!sticky) bt = setTimeout(() => { badge.style.display = 'none'; }, 9000);
+    badge.style.background = c[0]; badge.style.color = c[1]; badge.textContent = '🛵 Reparto: ' + text; badge.style.display = 'block'; badge.style.padding = '8px 12px';
+    // Después de unos segundos queda un 🛵 chiquito (así se ve que la extensión está activa). Los errores se quedan hasta que pase algo.
+    clearTimeout(bt); if (!sticky) bt = setTimeout(() => { badge.textContent = '🛵'; badge.style.padding = '4px 8px'; }, 9000);
   }
+  setTimeout(() => say('ok', 'activo · busca pedidos con ' + REP), 1200);
 
   const panelId = () => { const p = parsePedido(document.body.innerText); return p; };
   const quiet = () => {
@@ -37,14 +43,17 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   function enviar(d, final) {
-    const hash = [d.nombre, d.tel, d.dir, d.depto || '', d.cobrar, final ? 'f' : 'p'].join('|');
+    const pedido = { fudo: d.id, nombre: String(d.nombre || 'Cliente').slice(0, 80), tel: String(d.tel || '').replace(/\*/g, '').slice(0, 30), dir: String(d.dir).slice(0, 200), depto: String(d.depto || '').slice(0, 60), total: Math.round(d.total || 0), cobrar: Math.round(d.cobrar || 0), pago: String(d.pago || 'Sin verificar').slice(0, 120), origen: String(d.origen || '').slice(0, 40), listo: !!d.listo, t: Date.now() };
+    // huella de lo enviado: v2|datos|f(inal)/p(rovisorio)|L(isto)/-  (si cambia algo —el pago, la dirección, pasar a listo— se vuelve a mandar)
+    const hash = ['v2', pedido.nombre, pedido.tel, pedido.dir, pedido.depto, pedido.cobrar, pedido.pago, final ? 'f' : 'p', pedido.listo ? 'L' : '-'].join('|');
     if (S.sent[d.id] === hash) return;
-    S.sent[d.id] = hash; S.last = d.id; save();
-    const pedido = { fudo: d.id, nombre: String(d.nombre || 'Cliente').slice(0, 80), tel: String(d.tel || '').replace(/\*/g, '').slice(0, 30), dir: String(d.dir).slice(0, 200), depto: String(d.depto || '').slice(0, 60), total: Math.round(d.total || 0), cobrar: Math.round(d.cobrar || 0), pago: String(d.pago || 'Sin verificar').slice(0, 120), origen: String(d.origen || '').slice(0, 40), t: Date.now() };
+    const prev = S.sent[d.id], prevData = S.data[d.id];
+    S.sent[d.id] = hash; S.data[d.id] = pedido; S.last = d.id; save();
+    const fallo = () => { if (prev === undefined) delete S.sent[d.id]; else S.sent[d.id] = prev; if (prevData === undefined) delete S.data[d.id]; else S.data[d.id] = prevData; save(); };
     chrome.runtime.sendMessage({ type: 'send', pedido }).then(r => {
-      if (r && r.ok) say('ok', 'pedido #' + d.id + ' enviado' + (final ? '' : ' (pago sin verificar)'));
-      else { delete S.sent[d.id]; save(); say(r && r.nokey ? 'warn' : 'err', (r && r.error) || 'no se pudo enviar #' + d.id, true); }
-    }).catch(e => { delete S.sent[d.id]; save(); say('err', 'no se pudo enviar #' + d.id, true); });
+      if (r && r.ok) say('ok', 'pedido #' + d.id + (pedido.listo ? ' marcado listo' : ' enviado') + (final ? '' : ' (pago sin verificar)'));
+      else { fallo(); say(r && r.nokey ? 'warn' : 'err', (r && r.error) || 'no se pudo enviar #' + d.id, true); }
+    }).catch(e => { fallo(); say('err', 'no se pudo enviar #' + d.id, true); });
   }
 
   /* Abre el detalle de la fila un instante, lo lee y vuelve a donde estaba. */
@@ -65,7 +74,7 @@
   /* Detalle del pedido + datos de la fila de la tabla (por si el detalle no trae algo). Si no se pudo leer el total del detalle se usa el de la tabla. */
   function completar(p, r) {
     const total = p.total || r.total || 0;
-    return { ...p, nombre: p.cliente || r.cliente, tel: p.tel || r.tel, depto: p.depto || r.depto, total, cobrar: Math.max(0, total - (p.pagado || 0)) };
+    return { ...p, nombre: p.cliente || r.cliente, tel: p.tel || r.tel, depto: p.depto || r.depto, total, cobrar: Math.max(0, total - (p.pagado || 0)), listo: r.tabla === 'listo' };
   }
 
   async function tick() {
@@ -77,7 +86,10 @@
       if (open && fo && !motivoNo(open, now, true)) enviar(completar(open, fo), true);
       // 2) pedidos con el repartidor asignado en las tablas
       for (const r of filas) {
-        if (S.sent[r.id] && /\|f$/.test(S.sent[r.id])) continue;
+        const hecho = S.sent[r.id], final = hecho && /^v2\|.*\|f\|[L-]$/.test(hecho), yaListo = hecho && /\|L$/.test(hecho);
+        if (final && (yaListo || r.tabla !== 'listo')) continue;
+        // ya se mandó con el pago leído y ahora pasó a "Listo para entregar": se avisa con los mismos datos, sin abrir el detalle
+        if (final && r.tabla === 'listo' && S.data[r.id]) { enviar({ ...S.data[r.id], id: S.data[r.id].fudo, listo: true }, true); continue; }
         S.seen[r.id] = S.seen[r.id] || now;
         if (open && open.id === r.id) continue;
         if ((S.tries[r.id] || 0) < 3 && quiet()) {
@@ -85,7 +97,7 @@
           const p = await leerDetalle(r);
           if (p && !motivoNo(p, now, true)) { enviar(completar(p, r), true); continue; }
         }
-        if (!S.sent[r.id] && now - S.seen[r.id] > 25000) enviar({ id: r.id, nombre: r.cliente, tel: r.tel, dir: r.dir, depto: r.depto, total: r.total, cobrar: r.total, pago: 'Sin verificar', origen: '' }, false);
+        if (!S.sent[r.id] && now - S.seen[r.id] > 25000) enviar({ id: r.id, nombre: r.cliente, tel: r.tel, dir: r.dir, depto: r.depto, total: r.total, cobrar: r.total, pago: 'Sin verificar', origen: '', listo: r.tabla === 'listo' }, false);
       }
     } catch (e) { console.warn('Shivos Reparto', e); }
   }
