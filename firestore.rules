@@ -71,12 +71,13 @@ service cloud.firestore {
       match /inbox/{d} {
         allow read, delete: if isStaff(l);
         allow create, update: if claveOk()
-          && request.resource.data.keys().hasOnly(['key','fudo','nombre','tel','dir','total','cobrar','pago','origen','t'])
+          && request.resource.data.keys().hasOnly(['key','fudo','nombre','tel','dir','depto','total','cobrar','pago','origen','t'])
           && request.resource.data.fudo is string && request.resource.data.fudo.size() > 0 && request.resource.data.fudo.size() <= 12
           && d == 'f' + request.resource.data.fudo
           && request.resource.data.nombre is string && request.resource.data.nombre.size() <= 80
           && request.resource.data.tel is string && request.resource.data.tel.size() <= 30
           && request.resource.data.dir is string && request.resource.data.dir.size() > 0 && request.resource.data.dir.size() <= 200
+          && (!('depto' in request.resource.data) || (request.resource.data.depto is string && request.resource.data.depto.size() <= 60))
           && request.resource.data.total is number && request.resource.data.cobrar is number
           && request.resource.data.pago is string && request.resource.data.pago.size() <= 120;
       }

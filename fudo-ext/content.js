@@ -4,7 +4,10 @@
    3) Lo manda a Reparto (service worker -> Firestore). Si no pudo leer el pago, lo manda igual a los 25 s con "Sin verificar" (el repartidor cobra el total por las dudas). */
 (() => {
   if (window.__shivosReparto) return; window.__shivosReparto = true;
-  const { parsePedido, motivoNo, parseFilas, motivoFila } = window.FudoLib;
+  const { parsePedido, motivoNo, parseFilas, motivoFila, esRep } = window.FudoLib;
+  let REP = 'MOTOO'; // nombre del repartidor en Fudo que significa "este pedido va a Reparto"
+  chrome.storage.local.get('repartidor').then(r => { if (r.repartidor) REP = r.repartidor; }).catch(() => { });
+  chrome.storage.onChanged.addListener(ch => { if (ch.repartidor) REP = ch.repartidor.newValue || 'MOTOO'; });
   const S = { sent: {}, seen: {}, tries: {}, busy: false, lastInput: 0, own: false, last: null };
   const store = chrome.storage.local;
   store.get('sent').then(r => { S.sent = r.sent || {}; }).catch(() => { });
@@ -34,10 +37,10 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   function enviar(d, final) {
-    const hash = [d.nombre, d.tel, d.dir, d.cobrar, final ? 'f' : 'p'].join('|');
+    const hash = [d.nombre, d.tel, d.dir, d.depto || '', d.cobrar, final ? 'f' : 'p'].join('|');
     if (S.sent[d.id] === hash) return;
     S.sent[d.id] = hash; S.last = d.id; save();
-    const pedido = { fudo: d.id, nombre: String(d.nombre || 'Cliente').slice(0, 80), tel: String(d.tel || '').slice(0, 30), dir: String(d.dir).slice(0, 200), total: Math.round(d.total || 0), cobrar: Math.round(d.cobrar || 0), pago: String(d.pago || 'Sin verificar').slice(0, 120), origen: String(d.origen || '').slice(0, 40), t: Date.now() };
+    const pedido = { fudo: d.id, nombre: String(d.nombre || 'Cliente').slice(0, 80), tel: String(d.tel || '').replace(/\*/g, '').slice(0, 30), dir: String(d.dir).slice(0, 200), depto: String(d.depto || '').slice(0, 60), total: Math.round(d.total || 0), cobrar: Math.round(d.cobrar || 0), pago: String(d.pago || 'Sin verificar').slice(0, 120), origen: String(d.origen || '').slice(0, 40), t: Date.now() };
     chrome.runtime.sendMessage({ type: 'send', pedido }).then(r => {
       if (r && r.ok) say('ok', 'pedido #' + d.id + ' enviado' + (final ? '' : ' (pago sin verificar)'));
       else { delete S.sent[d.id]; save(); say(r && r.nokey ? 'warn' : 'err', (r && r.error) || 'no se pudo enviar #' + d.id, true); }
@@ -62,22 +65,21 @@
   async function tick() {
     try {
       const now = Date.now();
-      // 1) el detalle que la caja ya tiene abierto
-      const open = panelId();
-      if (open && !motivoNo(open, now)) enviar({ ...open, nombre: open.cliente }, true);
-      // 2) pedidos nuevos en las tablas
-      for (const r of parseFilas(document)) {
-        if (motivoFila(r, now)) continue;
+      const filas = parseFilas(document).filter(r => esRep(r, REP) && !motivoFila(r, now));
+      // 1) el detalle que la caja ya tiene abierto (solo si ese pedido tiene asignado el repartidor de Reparto)
+      const open = panelId(), fo = open && filas.find(r => r.id === open.id);
+      if (open && fo && !motivoNo(open, now, true)) enviar({ ...open, nombre: open.cliente, tel: open.tel || fo.tel, depto: open.depto || fo.depto }, true);
+      // 2) pedidos con el repartidor asignado en las tablas
+      for (const r of filas) {
         if (S.sent[r.id] && /\|f$/.test(S.sent[r.id])) continue;
         S.seen[r.id] = S.seen[r.id] || now;
         if (open && open.id === r.id) continue;
         if ((S.tries[r.id] || 0) < 3 && quiet()) {
           S.tries[r.id] = (S.tries[r.id] || 0) + 1;
           const p = await leerDetalle(r);
-          if (p && !motivoNo(p, now)) { enviar({ ...p, nombre: p.cliente }, true); continue; }
-          if (p && motivoNo(p, now) && motivoNo(p, now) !== 'todavía no confirmado') { S.sent[r.id] = 'x|f'; continue; } // no es nuestro (app de delivery, etc.)
+          if (p && !motivoNo(p, now, true)) { enviar({ ...p, nombre: p.cliente || r.cliente, tel: p.tel || r.tel, depto: p.depto || r.depto }, true); continue; }
         }
-        if (!S.sent[r.id] && now - S.seen[r.id] > 25000) enviar({ id: r.id, nombre: r.cliente, tel: r.tel, dir: r.dir, total: r.total, cobrar: r.total, pago: 'Sin verificar', origen: '' }, false);
+        if (!S.sent[r.id] && now - S.seen[r.id] > 25000) enviar({ id: r.id, nombre: r.cliente, tel: r.tel, dir: r.dir, depto: r.depto, total: r.total, cobrar: r.total, pago: 'Sin verificar', origen: '' }, false);
       }
     } catch (e) { console.warn('Shivos Reparto', e); }
   }

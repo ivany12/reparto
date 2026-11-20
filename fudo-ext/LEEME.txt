@@ -10,9 +10,9 @@ INSTALAR (una sola vez, en la compu de la caja)
 6. Abrí Fudo en la pantalla Delivery y dejala abierta.
 
 USO
-No hay que hacer nada. Cuando entra un pedido a domicilio (con dirección y teléfono) lo manda solo a Reparto.
+Cuando en Fudo le asignás el repartidor MOTOO a un pedido, la extensión lo manda solo a Reparto (con piso/depto si lo tiene). Los pedidos con otro repartidor, o sin repartidor, no se mandan.
+El nombre del repartidor se puede cambiar en el ícono de la extensión.
 Abajo a la izquierda de Fudo aparece un cartelito amarillo: "Reparto: pedido #123 enviado".
  - Naranja: falta la clave.  Rojo: no se pudo enviar (clave mal o sin internet). Tocar el cartel reenvía el último pedido.
- - Los pedidos de Rappi / PedidosYa se ignoran.
  - Para saber si el pedido ya está pagado, la extensión abre un instante el detalle del pedido cuando nadie está usando la pantalla, y vuelve donde estabas.
    Si no puede, lo manda igual a los 25 segundos como "Sin verificar" (el repartidor cobra el total por las dudas).

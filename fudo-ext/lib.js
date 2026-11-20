@@ -6,6 +6,14 @@
   const money = s => { const m = String(s || '').match(/\$\s*([\d.]+)(?:,(\d{1,2}))?/); return m ? Math.round(parseFloat(m[1].replace(/\./g, '') + '.' + (m[2] || '0'))) : null; };
   const lines = t => String(t || '').split(/\n+/).map(x => x.trim()).filter(Boolean);
 
+  /* Dirección de Fudo -> { dir, depto }. Fudo agrega el piso/depto después de "Argentina ." (ej. "…, Argentina . 3/4"). "S/N" no cuenta. */
+  function partirDir(raw) {
+    let depto = '';
+    const t = String(raw || '').replace(/\s+/g, ' ').trim();
+    const m = t.match(/Argentina\s*\.\s*(.*)$/i);
+    if (m) { depto = m[1].trim(); if (/^s\s*\/?\s*n$/i.test(depto)) depto = ''; }
+    return { dir: limpiarDir(m ? t.slice(0, m.index + 'Argentina'.length) : t), depto: depto.slice(0, 60) };
+  }
   /* Saca "Comuna 11", "Ciudad Autónoma de Buenos Aires", "Argentina" y el punto final de la dirección de Fudo. */
   function limpiarDir(raw) {
     const parts = String(raw || '').replace(/\s*\.\s*$/, '').split(',').map(x => x.trim()).filter(Boolean)
@@ -42,20 +50,21 @@
     const pagado = pagos.filter(p => !/efectivo/i.test(p.metodo)).reduce((a, p) => a + p.monto, 0);
     return {
       id, recepcion: F['Recepción'] || '', origen: F['Origen'] || '', tipo: F['Tipo'] || '', cliente: F['Cliente'] || '', tel: F['Teléfono'] || '',
-      dirRaw: F['Dirección'] || '', dir: limpiarDir(F['Dirección']), estado: F['Estado'] || '', total: total || 0, pagos,
+      dirRaw: F['Dirección'] || '', dir: partirDir(F['Dirección']).dir, depto: partirDir(F['Dirección']).depto, estado: F['Estado'] || '', total: total || 0, pagos,
       cobrar: Math.max(0, (total || 0) - pagado),
       pago: pagos.length ? pagos.map(p => p.metodo + ' $' + p.monto.toLocaleString('es-AR')).join(' · ') : 'Sin pago registrado'
     };
   }
 
   /* ¿Es un delivery propio que tiene que ir a Reparto? Devuelve null si sí, o el motivo por el que no. */
-  function motivoNo(p, ahora) {
+  /* explicito = la caja le asignó el repartidor de Reparto en Fudo: ahí se confía en esa señal (no se filtra por origen, teléfono ni estado). */
+  function motivoNo(p, ahora, explicito) {
     if (!p) return 'sin pedido';
-    if (!/domicilio/i.test(p.tipo)) return 'no es a domicilio';
-    if (/rappi|pedidos\s*ya|pedidosya/i.test(p.origen)) return 'es de una app de delivery';
-    if (/\*/.test(p.tel)) return 'teléfono oculto (app)';
+    if (!explicito && !/domicilio/i.test(p.tipo)) return 'no es a domicilio';
+    if (!explicito && /rappi|pedidos\s*ya|pedidosya/i.test(p.origen)) return 'es de una app de delivery';
+    if (!explicito && /\*/.test(p.tel)) return 'teléfono oculto (app)';
     if (!p.dir) return 'sin dirección';
-    if (!/^confirmado$/i.test(p.estado)) return 'todavía no confirmado';
+    if (!explicito && !/^confirmado$/i.test(p.estado)) return 'todavía no confirmado';
     const m = p.recepcion.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/);
     if (m) {
       const y = +m[3] < 100 ? 2000 + +m[3] : +m[3], t = new Date(y, +m[2] - 1, +m[1], +m[4], +m[5]).getTime();
@@ -74,7 +83,7 @@
         const th = tr.querySelector('th.col-id, th'); if (!th || tr.classList.contains('empty')) return;
         const id = (th.textContent.match(/\d+/) || [])[0]; if (!id) return;
         const cells = [...tr.children], g = n => { const i = ix(n); return i >= 0 && cells[i] ? cells[i].textContent.replace(/\s+/g, ' ').trim() : ''; };
-        out.push({ id, el: tr, hora: g('hora inicio'), dirRaw: g('dirección'), dir: limpiarDir(g('dirección')), tel: g('teléfono'), cliente: g('cliente'), total: money(g('total')) || 0, tabla: /ready/.test(t.className) ? 'listo' : 'prep' });
+        out.push({ id, el: tr, hora: g('hora inicio'), dirRaw: g('dirección'), dir: partirDir(g('dirección')).dir, tel: g('teléfono'), cliente: g('cliente'), rep: g('repartidor'), depto: partirDir(g('dirección')).depto, total: money(g('total')) || 0, tabla: /ready/.test(t.className) ? 'listo' : 'prep' });
       });
     });
     return out;
@@ -82,10 +91,10 @@
   /* ¿Esta fila parece un delivery propio (dirección y teléfono reales)? Devuelve el motivo si no. */
   function motivoFila(r, ahora) {
     if (!r.dir || r.dir === '-') return 'sin dirección';
-    if (!r.tel || /\*/.test(r.tel)) return 'teléfono oculto o vacío';
     const m = r.hora.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/);
     if (m) { const y = +m[3] < 100 ? 2000 + +m[3] : +m[3], t = new Date(y, +m[2] - 1, +m[1], +m[4], +m[5]).getTime(); if ((ahora || Date.now()) - t > 4 * 3600 * 1000) return 'pedido viejo'; }
     return null;
   }
-  root.FudoLib = { parsePedido, motivoNo, limpiarDir, money, parseFilas, motivoFila };
+  const esRep = (r, nombre) => nrm(r.rep) === nrm(nombre || 'MOTOO');
+  root.FudoLib = { parsePedido, motivoNo, limpiarDir, partirDir, money, parseFilas, motivoFila, esRep };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -315,10 +315,10 @@ async function importarFudo(x, docId) {
   const id = 'f' + x.fudo;
   try {
     const cur = await getDoc(ref('pedidos', id));
-    const f = { nombre: String(x.nombre || 'Cliente'), tel: String(x.tel || ''), dir: String(x.dir || ''), depto: '', nota: '', cobrar: Math.max(0, Math.round(+x.cobrar || 0)), wa: false, geo: null };
+    const f = { nombre: String(x.nombre || 'Cliente'), tel: String(x.tel || ''), dir: String(x.dir || ''), depto: String(x.depto || ''), nota: '', cobrar: Math.max(0, Math.round(+x.cobrar || 0)), wa: false, geo: null };
     if (cur.exists()) {
       const o = cur.data();
-      if (o.estado === 'cocina' || o.estado === 'listo') { editarPedido(o, { ...f, depto: o.depto || '', nota: o.nota || '', geo: null }); updateDoc(ref('pedidos', id), { pagoFudo: x.pago || '' }).catch(() => { }); }
+      if (o.estado === 'cocina' || o.estado === 'listo') { editarPedido(o, { ...f, depto: f.depto || o.depto || '', nota: o.nota || '', geo: null }); updateDoc(ref('pedidos', id), { pagoFudo: x.pago || '' }).catch(() => { }); }
     } else {
       let g = null;
       try {
