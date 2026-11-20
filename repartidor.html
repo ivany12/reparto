@@ -149,7 +149,8 @@ const geoTried = new Set();
 function ensureGeo(o) {
   if (o.geo || geoTried.has(o.id) || !o.dir) return;
   geoTried.add(o.id);
-  GEO.geocode(o.dir).then(g => {
+  const nb = LOC && LOC.base ? { lat: LOC.base.lat, lng: LOC.base.lng, km: (+LOC.radio > 0 ? +LOC.radio : 6) } : null;
+  GEO.geocode(o.dir, nb).then(g => {
     if (!g) return;
     o.geo = g;
     updateDoc(ref('pedidos', o.id), { geo: g, upd: Date.now() }).catch(() => { });

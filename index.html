@@ -118,6 +118,9 @@ const mins = t => Math.max(0, Math.round((Date.now() - t) / 60000));
 const dayKey = t => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 const startOfDay = back => { const d = new Date(Date.now() - back * 86400000); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const BASE_FALLBACK = { lat: -34.6045, lng: -58.4895 };
+// Zona de reparto: las direcciones que se buscan al cargar un pedido tienen que caer dentro de este radio (km) del local.
+const radioKm = () => { const r = +(LOC && LOC.radio); return r > 0 ? r : 6; };
+const zona = () => { const b = (LOC && LOC.base) || BASE_FALLBACK; return { lat: b.lat, lng: b.lng, km: radioKm() }; };
 
 let EMAIL = '', LOC = null, pedidos = [], posiciones = {}, placing = null, selId = null, started = false;
 const isOwner = () => LOC && LOC.owner === EMAIL;
@@ -283,7 +286,7 @@ function enviarLink(o) {
   toast('Tocá enviar en WhatsApp');
 }
 function geocodificar(id, tok, dir) {
-  GEO.geocode(dir).then(g => {
+  GEO.geocode(dir, zona()).then(g => {
     if (!g) return toast('No pude ubicar «' + dir + '» en el mapa. Tocá «Ubicar en mapa» en el pedido.');
     updateDoc(ref('pedidos', id), { geo: g }).catch(() => { });
     updateDoc(ref('track', tok), { dest: { lat: g.lat, lng: g.lng } }).catch(() => { });
@@ -342,6 +345,7 @@ function formPedido(ed) {
   const PIN = '<div class="mk-pin"><svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11L12 3L21 11M6 9.5V21H18V9.5"/></svg></div>';
   let lm = null, pin = null, sel = ed && ed.geo ? { lat: ed.geo.lat, lng: ed.geo.lng, src: ed.geo.src || 'manual', exact: true, label: 'ubicación guardada' } : null, cands = [], tim = 0, seq = 0, warned = false;
   const say = (cls, t) => { st.className = cls; st.textContent = t; };
+  const lejosKm = c => { if (!c) return 0; const z = zona(), d = GEO.dist(c, z) / 1000; return d > z.km ? (d < 10 ? d.toFixed(1) : Math.round(d)) : 0; };
   const paint = () => {
     warned = false; btn.textContent = ed ? 'Guardar cambios' : 'Cargar pedido';
     if (!sel) return;
@@ -349,6 +353,7 @@ function formPedido(ed) {
     if (sel.src === 'manual' && !sel.label) say('ok', '✓ Ubicación marcada a mano');
     else if (sel.exact) say('ok', '✓ Dirección encontrada: ' + sel.label);
     else say('warn', '⚠ Solo encontré la calle (aproximada): ' + sel.label + '. Mové el pin a la casa.');
+    const kmL = lejosKm(sel); if (kmL) say('warn', '⚠ Ese punto está a ' + kmL + ' km del local, fuera de tu zona de reparto (' + radioKm() + ' km). Revisá que sea la dirección correcta.');
     cc.querySelectorAll('button').forEach((b, i) => b.classList.toggle('on', cands[i] && sel.lat === cands[i].lat && sel.lng === cands[i].lng));
   };
   if (window.L) {
@@ -362,12 +367,13 @@ function formPedido(ed) {
     const q = F.dir.value.trim(), my = ++seq;
     if (q.length < 4) { say('', ''); return; }
     say('', 'Buscando…');
-    let r = []; try { r = await GEO.search(q); } catch { }
+    let r = []; try { r = await GEO.search(q, zona()); } catch { }
     if (my !== seq) return;
     cands = r; cc.innerHTML = '';
     r.slice(0, 4).forEach((c, i) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = (c.exact ? '' : '~ ') + (c.label || 'Opción ' + (i + 1)); b.onclick = () => { sel = { ...c }; paint(); }; cc.appendChild(b); });
     if (r.length) { sel = { ...r[0] }; paint(); }
-    else say('warn', 'No encuentro esa dirección. Tocá el mapa donde es.');
+    else if (r.lejos) say('warn', '⚠ Esa dirección queda a más de ' + radioKm() + ' km del local (' + (r.lejosEj || 'otra zona') + '). Revisá la calle o el barrio, o tocá el mapa donde es.');
+    else say('warn', 'No encuentro esa dirección cerca del local. Tocá el mapa donde es.');
   };
   if (sel) paint(); else if (ed && ed.dir) buscar();
   F.dir.addEventListener('input', () => { sel = null; cands = []; cc.innerHTML = ''; if (pin) { pin.remove(); pin = null; } warned = false; btn.textContent = ed ? 'Guardar cambios' : 'Cargar pedido'; clearTimeout(tim); tim = setTimeout(buscar, 900); });
@@ -375,9 +381,9 @@ function formPedido(ed) {
     e.preventDefault();
     const d = Object.fromEntries(new FormData(e.target)), t = s => String(s || '').trim();
     if (!t(d.nombre) || !t(d.tel) || !t(d.dir)) return;
-    if ((!sel || !sel.exact) && !warned) { // sin ubicación segura: avisamos una vez, y a la segunda deja cargar igual
+    if ((!sel || !sel.exact || lejosKm(sel)) && !warned) { // sin ubicación segura: avisamos una vez, y a la segunda deja cargar igual
       warned = true; btn.textContent = 'Cargar igual';
-      say('warn', !sel ? 'Falta ubicar la dirección: tocá el mapa donde es, o «Cargar igual» para marcarla después.' : 'La ubicación es aproximada: mové el pin a la casa, o «Cargar igual».');
+      say('warn', !sel ? 'Falta ubicar la dirección: tocá el mapa donde es, o «Cargar igual» para marcarla después.' : lejosKm(sel) ? 'Ese punto está a ' + lejosKm(sel) + ' km del local. Si es correcto, tocá «Cargar igual».' : 'La ubicación es aproximada: mové el pin a la casa, o «Cargar igual».');
       return;
     }
     const f = { nombre: t(d.nombre), tel: t(d.tel), dir: t(d.dir), depto: t(d.depto), nota: t(d.nota), cobrar: Math.max(0, parseInt(String(d.cobrar).replace(/\D/g, ''), 10) || 0), wa: !!d.wa, geo: sel && sel.exact ? { lat: sel.lat, lng: sel.lng, src: sel.src } : null };
@@ -411,6 +417,7 @@ function ajustes() {
   const m = modal('<h2>Ajustes</h2>' + (owner ? '' : '<p class="muted">Solo el dueño puede cambiar esto.</p>') +
     '<label>Nombre del local<input id="s-n" value="' + esc(LOC.nombre) + '"' + dis + '></label>' +
     '<div class="g2"><label>WhatsApp del local<input id="s-t" value="' + esc(LOC.tel) + '"' + dis + '></label><label>Color (hex)<input id="s-c" value="' + esc(LOC.color) + '"' + dis + '></label></div>' +
+    '<label>Zona de reparto (km desde el local)<input id="s-r" type="number" min="1" max="30" step="0.5" value="' + radioKm() + '"' + dis + '></label><p class="muted">Al cargar un pedido, solo se aceptan direcciones dentro de este radio (si no, avisa).</p>' +
     (owner ? '<button type="button" class="btn" id="mb">Marcar el local en el mapa</button>' : '') +
     '<h2 style="font-size:20px">Repartidores</h2><div id="rl" style="display:flex;flex-direction:column;gap:8px">' + riders.map(row).join('') + '</div>' +
     (owner ? '<button type="button" class="btn sm" id="ra">+ Agregar repartidor</button>' : '') +
@@ -430,7 +437,7 @@ function ajustes() {
     const map = {}; riders.forEach(r => { const e = r.e.trim().toLowerCase(), n = r.n.trim(); if (e && n) map[keyOf(e)] = n; });
     const st = [...new Set([LOC.owner, ...m.querySelector('#s-s').value.split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(x => /@/.test(x))])];
     const col_ = m.querySelector('#s-c').value.trim();
-    updateDoc(ref(), { nombre: m.querySelector('#s-n').value.trim() || LOC.nombre, tel: m.querySelector('#s-t').value.trim(), color: /^#[0-9a-f]{6}$/i.test(col_) ? col_ : LOC.color, riders: map, staff: st })
+    updateDoc(ref(), { nombre: m.querySelector('#s-n').value.trim() || LOC.nombre, tel: m.querySelector('#s-t').value.trim(), radio: Math.min(30, Math.max(1, +m.querySelector('#s-r').value || 6)), color: /^#[0-9a-f]{6}$/i.test(col_) ? col_ : LOC.color, riders: map, staff: st })
       .then(() => { closeModal(); toast('Guardado'); }).catch(e => toast('No se pudo guardar: ' + e.code));
   };
 }

@@ -78,30 +78,39 @@
 
   /* Dirección -> lista de candidatos [{lat,lng,label,src,exact}] (los exactos primero). Vacía si no encuentra nada.
      Prueba variantes del texto (Pje -> Pasaje, sin "Pasaje") en Georef (CABA y provincia de Buenos Aires) y, si no hay una exacta, en OpenStreetMap. */
-  async function search(dir) {
+  async function search(dir, near) {
     dir = String(dir || '').trim();
     if (dir.length < 4) return [];
     const m = dir.match(/^(.*?\d{1,5})/); // calle + altura; descarta piso/depto
     const base = normDir(m ? m[1] : dir);
     const vs = [...new Set([base, base.replace(TIPO, '')])].filter(Boolean);
     const out = [];
-    const add = c => { if (c && !out.some(o => dist(o, c) < 30)) out.push(c); };
-    const G = 'https://apis.datos.gob.ar/georef/api/direcciones?max=3&direccion=';
+    // near = {lat,lng,km}: solo direcciones dentro de esa zona (ej. la zona de reparto del local). Las de afuera se cuentan en .lejos.
+    let lejos = 0, lejosEj = '';
+    const add = c => {
+      if (!c) return;
+      if (near && dist(c, near) > near.km * 1000) { lejos++; lejosEj = lejosEj || c.label; return; }
+      if (!out.some(o => dist(o, c) < 30)) out.push(c);
+    };
+    const G = 'https://apis.datos.gob.ar/georef/api/direcciones?max=10&direccion=';
     const jobs = [];
     vs.forEach(q => ['02', '06'].forEach(prov => jobs.push(getJson(G + encodeURIComponent(q) + '&provincia=' + prov).then(j => ((j && j.direcciones) || []).forEach(d => add(fromGeoref(d)))))));
     await Promise.all(jobs);
+    let vb = '';
+    if (near) { const dl = near.km / 111, dg = near.km / (111 * Math.cos(near.lat * Math.PI / 180)); vb = '&bounded=1&viewbox=' + [near.lng - dg, near.lat + dl, near.lng + dg, near.lat - dl].map(x => x.toFixed(5)).join(','); }
     if (!out.some(c => c.exact)) {
       for (const q of vs.slice(0, 2)) {
-        const j = await getJson('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=3&addressdetails=1&countrycodes=ar&q=' + encodeURIComponent(q + ', Buenos Aires'));
+        const j = await getJson('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=1&countrycodes=ar' + vb + '&q=' + encodeURIComponent(q + ', Buenos Aires'));
         (Array.isArray(j) ? j : []).forEach(x => add(fromOsm(x)));
       }
     }
     out.sort((a, b) => (b.exact ? 1 : 0) - (a.exact ? 1 : 0));
-    return out.slice(0, 5);
+    const res = out.slice(0, 5); res.lejos = lejos; res.lejosEj = lejosEj;
+    return res;
   }
   /* Primer candidato como {lat,lng,src} o null. */
-  async function geocode(dir) {
-    const r = await search(dir);
+  async function geocode(dir, near) {
+    const r = await search(dir, near);
     return r[0] ? { lat: r[0].lat, lng: r[0].lng, src: r[0].src } : null;
   }
 
