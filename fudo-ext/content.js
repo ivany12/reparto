@@ -8,13 +8,13 @@
   let REP = 'MOTOO'; // nombre del repartidor en Fudo que significa "este pedido va a Reparto"
   chrome.storage.local.get('repartidor').then(r => { if (r.repartidor) REP = r.repartidor; }).catch(() => { });
   chrome.storage.onChanged.addListener(ch => { if (ch.repartidor) REP = ch.repartidor.newValue || 'MOTOO'; });
-  const S = { sent: {}, data: {}, seen: {}, tries: {}, busy: false, lastInput: 0, own: false, last: null };
+  const S = { sent: {}, data: {}, done: {}, chk: {}, cierre: {}, seen: {}, tries: {}, busy: false, lastInput: 0, own: false, last: null };
   const store = chrome.storage.local;
-  store.get(['sent', 'data']).then(r => { S.sent = r.sent || {}; S.data = r.data || {}; }).catch(() => { });
+  store.get(['sent', 'data', 'done']).then(r => { S.sent = r.sent || {}; S.data = r.data || {}; S.done = r.done || {}; }).catch(() => { });
   // sent[id] = huella de lo último enviado; data[id] = ese pedido completo (para avisar "listo" sin volver a leer el detalle)
   const save = () => {
-    for (const o of [S.sent, S.data]) { const keys = Object.keys(o); if (keys.length > 300) keys.slice(0, keys.length - 300).forEach(k => delete o[k]); }
-    store.set({ sent: S.sent, data: S.data }).catch(() => { });
+    for (const o of [S.sent, S.data, S.done]) { const keys = Object.keys(o); if (keys.length > 300) keys.slice(0, keys.length - 300).forEach(k => delete o[k]); }
+    store.set({ sent: S.sent, data: S.data, done: S.done }).catch(() => { });
   };
   ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel'].forEach(ev => addEventListener(ev, () => { if (!S.own) S.lastInput = Date.now(); }, true));
 
@@ -63,7 +63,7 @@
     try {
       S.own = true; row.el.click(); S.own = false;
       let p = null;
-      for (let i = 0; i < 30; i++) { await sleep(100); const q = panelId(); if (q && q.id === row.id && q.estado) { p = q; break; } }
+      for (let i = 0; i < 30; i++) { await sleep(100); const q = panelId(); if (q && q.id === row.id && (q.estado || q.total)) { p = q; break; } }
       return p;
     } finally {
       if (location.hash !== prev) { S.own = true; location.hash = prev; setTimeout(() => { S.own = false; }, 300); }
@@ -77,6 +77,31 @@
   function completar(p, r) {
     const total = p.total || r.total || 0;
     return { ...p, nombre: p.cliente || r.cliente, tel: p.tel || r.tel, depto: p.depto || r.depto, total, cobrar: Math.max(0, total - (p.pagado || 0)), fase: faseDe(r) };
+  }
+
+  /* El repartidor entregó el pedido en Reparto: se lo marca "Entregados" en Fudo (botón verde del detalle de un pedido ENVIADO).
+     Solo si ya está pagado (QR, transferencia). Si Fudo pide confirmar algo, no se toca y se avisa. */
+  const botonEntregados = () => [...document.querySelectorAll('ert-button.status-delivery-returned button'), ...document.querySelectorAll('ert-button.status-delivery-returned')].find(b => { const q = b.getBoundingClientRect(); return /^entregados?$/i.test((b.textContent || '').trim()) && q.width > 0 && q.height > 0; });
+  async function cerrarEnFudo(r) {
+    S.busy = true;
+    const prev = location.hash;
+    try {
+      S.own = true; r.el.click(); S.own = false;
+      let p = null;
+      for (let i = 0; i < 30; i++) { await sleep(100); const q = panelId(); if (q && q.id === r.id) { p = q; break; } }
+      if (!p) return;
+      if (!(p.pagos.length && p.total > 0 && p.cobrar === 0)) { S.done[r.id] = 'cobro'; say('warn', '#' + r.id + ' entregado por el repartidor: tiene cobro pendiente, cerralo vos en Fudo', true); return; }
+      const btn = botonEntregados();
+      if (!btn) { say('warn', '#' + r.id + ' entregado por el repartidor: no encontré el botón Entregados, marcalo vos', true); return; }
+      S.own = true; btn.click(); S.own = false;
+      await sleep(1800);
+      if (document.querySelector('.modal.in, .modal.show, [role=dialog]')) { S.done[r.id] = 'manual'; say('warn', '#' + r.id + ' entregado por el repartidor: Fudo pide confirmar, terminalo vos', true); return; }
+      if (parseFilas(document).some(x => x.id === r.id && x.tabla === 'enviado')) { say('warn', '#' + r.id + ' entregado por el repartidor: no se movió en Fudo, marcalo vos', true); return; }
+      S.done[r.id] = 'ok'; say('ok', '#' + r.id + ' marcado entregado en Fudo');
+    } finally {
+      if (location.hash !== prev) { S.own = true; location.hash = prev; setTimeout(() => { S.own = false; }, 300); }
+      S.busy = false; save();
+    }
   }
 
   async function tick() {
@@ -100,6 +125,13 @@
           if (p && !motivoNo(p, now, true)) { enviar(completar(p, r), true); continue; }
         }
         if (!S.sent[r.id] && now - S.seen[r.id] > 25000) enviar({ id: r.id, nombre: r.cliente, tel: r.tel, dir: r.dir, depto: r.depto, total: r.total, cobrar: r.total, pago: 'Sin verificar', origen: '', fase: faseDe(r) }, false);
+      }
+      // 3) pedidos que el repartidor ya entregó en Reparto: se cierran en Fudo (solo los pagados)
+      for (const r of filas) {
+        if (r.tabla !== 'enviado' || S.done[r.id] || !S.sent[r.id] || (S.cierre[r.id] || 0) >= 3 || now - (S.chk[r.id] || 0) < 8000) continue;
+        S.chk[r.id] = now;
+        const rs = await chrome.runtime.sendMessage({ type: 'salida', fudo: r.id }).catch(() => null);
+        if (rs && rs.ok && rs.entregado && quiet()) { S.cierre[r.id] = (S.cierre[r.id] || 0) + 1; await cerrarEnFudo(r); }
       }
     } catch (e) { console.warn('Shivos Reparto', e); }
   }

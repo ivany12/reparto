@@ -14,4 +14,14 @@ async function enviar(p) {
     return { ok: false, error: msg };
   } catch (e) { return { ok: false, error: 'sin conexión' }; }
 }
-chrome.runtime.onMessage.addListener((m, _s, reply) => { if (m && m.type === 'send') { enviar(m.pedido).then(reply); return true; } });
+/* ¿El repartidor ya entregó este pedido en Reparto? (documento salida/f<id>, lo escribe el panel). 404 = todavía no. */
+async function salida(fudo) {
+  try {
+    const r = await fetch('https://firestore.googleapis.com/v1/projects/' + PROJECT + '/databases/(default)/documents/reparto/' + LOCAL + '/salida/f' + encodeURIComponent(fudo) + '?key=' + API_KEY);
+    if (r.status === 404) return { ok: true, entregado: false };
+    if (!r.ok) return { ok: false };
+    const j = await r.json();
+    return { ok: true, entregado: !!(j.fields && j.fields.entregado && j.fields.entregado.booleanValue) };
+  } catch (e) { return { ok: false }; }
+}
+chrome.runtime.onMessage.addListener((m, _s, reply) => { if (m && m.type === 'send') { enviar(m.pedido).then(reply); return true; } if (m && m.type === 'salida') { salida(m.fudo).then(reply); return true; } });

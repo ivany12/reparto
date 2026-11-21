@@ -65,6 +65,11 @@ service cloud.firestore {
       // Bandeja de entrada de pedidos que llegan desde Fudo (extensión de Chrome de la caja).
       // Sin login: la extensión escribe con una clave guardada en secretos/ingest (solo la ve el dueño). El panel los importa y los borra.
       function claveOk() { return request.resource.data.key == get(/databases/$(database)/documents/reparto/$(l)/secretos/ingest).data.valor; }
+      // Pedidos de Fudo ya entregados y pagados: la extensión de la caja los lee (por id exacto) y los marca Entregado en Fudo.
+      match /salida/{d} {
+        allow get: if true;
+        allow write: if isStaff(l);
+      }
       match /secretos/{k} {
         allow read, write: if signed() && em() == loc(l).data.owner;
       }

@@ -185,7 +185,7 @@ function start() {
     GEO.geocode(LOC.dir || 'Tinogasta 3239, Villa del Parque').then(g => { if (g) updateDoc(ref(), { base: { lat: g.lat, lng: g.lng, src: g.src } }).catch(() => { }); });
   }
   onSnapshot(ref(), s => { if (s.exists()) { LOC = s.data(); drawRiders(); drawMap(); } });
-  onSnapshot(query(col('pedidos'), where('creado', '>=', startOfDay(1))), snap => { pedidos = []; snap.forEach(d => pedidos.push(d.data())); drawList(); drawMap(); }, err => toast('Sin conexión con la base: ' + err.code));
+  onSnapshot(query(col('pedidos'), where('creado', '>=', startOfDay(1))), snap => { pedidos = []; snap.forEach(d => pedidos.push(d.data())); drawList(); drawMap(); avisarFudoEntregados(); }, err => toast('Sin conexión con la base: ' + err.code));
   onSnapshot(col('inbox'), snap => (snap.docChanges ? snap.docChanges() : []).forEach(ch => { if (ch.type !== 'removed') importarFudo(ch.doc.data(), ch.doc.id); }), () => { });
   onSnapshot(col('pos'), snap => { posiciones = {}; snap.forEach(d => posiciones[d.id] = d.data()); drawRiders(); drawList(); drawMap(); }, () => { });
   setInterval(() => { drawList(); drawRiders(); }, 30000);
@@ -321,6 +321,19 @@ function crearPedido(f, x = {}) {
   if (f.wa) window.open(waUrl(o), '_blank'); // síncrono dentro del toque, para que el navegador no lo bloquee
   if (!f.geo) geocodificar(id, tok, f.dir);
   toast(x.fudo ? 'Pedido #' + num + ' llegó desde Fudo (' + f.nombre + ')' + (rd ? ' y salió con ' + rd.name : x.enviado ? ': asignale repartidor' : '') : 'Pedido #' + num + ' cargado' + (f.wa ? ': tocá enviar en WhatsApp' : ''));
+}
+
+/* Pedido de Fudo que el repartidor entregó y ya estaba pagado (QR, transferencia): se deja un aviso en «salida» para que la extensión de la caja lo marque Entregado en Fudo.
+   Los de efectivo no: esos los cierra la caja cuando vuelve el repartidor con la plata. */
+const fudoAvisados = new Set();
+function avisarFudoEntregados() {
+  pedidos.forEach(o => {
+    if (o.estado !== 'entregado' || !o.fudo || o.fudoSalida || fudoAvisados.has(o.id) || (+o.cobrar || 0) > 0 || Date.now() - (o.entregaT || 0) > 3 * 3600000) return;
+    fudoAvisados.add(o.id);
+    setDoc(ref('salida', 'f' + o.fudo), { fudo: String(o.fudo), entregado: true, t: Date.now() })
+      .then(() => updateDoc(ref('pedidos', o.id), { fudoSalida: Date.now() }))
+      .catch(() => fudoAvisados.delete(o.id));
+  });
 }
 
 /* ── pedidos que llegan solos desde Fudo (extensión de la caja -> bandeja inbox) ── */
