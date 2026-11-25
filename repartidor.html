@@ -76,6 +76,10 @@ h2{margin:0;font-family:var(--display);font-weight:400;font-size:24px;letter-spa
 .ncen{position:absolute;right:10px;bottom:24px;z-index:600;min-height:40px;font-size:14px}
 .mk-dest{width:40px;height:40px;border-radius:50%;background:var(--acc);display:grid;place-items:center;border:3px solid #000}.mk-dest svg{width:22px;height:22px}
 .mk-stop{width:28px;height:28px;border-radius:50%;background:#fff;color:#000;display:grid;place-items:center;font-weight:800;border:2px solid #000}
+.mv{min-width:48px;padding:0 12px;font-size:20px}
+.ordn{flex:none;min-width:26px;height:26px;padding:0 6px;border-radius:8px;background:var(--acc);color:var(--on-acc);display:inline-grid;place-items:center;font-family:var(--display);font-size:17px;line-height:1;margin-right:6px}
+.btn.sm{min-height:38px;padding:0 12px;font-size:14px}
+.btn:disabled{opacity:.35;cursor:default}
 .mk-me{width:44px;height:44px;display:grid;place-items:center}.mk-me .dot{width:30px;height:30px;border-radius:50%;background:var(--acc);border:3px solid #fff;display:grid;place-items:center;box-shadow:0 0 0 3px rgba(0,0,0,.5)}.mk-me .dot svg{width:16px;height:16px}
 </style>
 </head>
@@ -96,6 +100,7 @@ const ls = { get: k => { try { return localStorage.getItem(k); } catch { return 
 
 let EMAIL = '', ME = '', LOC = null, orders = [], listos = [], order = [], unsub = [];
 const quitados = new Set(); // listos que Nacho destildó
+let ordenSal = []; // orden en que elige llevar los listos (ids)
 let pos = null, gps = 'idle', watchId = null, lastSent = 0, lock = null;
 let fin = false, finT = 0, vuelta = false, hadStops = false; // fin: acaba de entregar el último · vuelta: volviendo al local
 const screen = html => { render.last = null; $app.innerHTML = html; };
@@ -162,6 +167,14 @@ function avisar(nuevos) {
 function stops() {
   const rank = id => { const i = order.indexOf(id); return i < 0 ? 1e9 : i; };
   return orders.slice().sort((a, b) => rank(a.id) - rank(b.id) || (a.orden || 0) - (b.orden || 0) || (a.salio || a.creado || 0) - (b.salio || b.creado || 0));
+}
+const listosOrd = () => { const r = id => { if (quitados.has(id)) return 2e9; const i = ordenSal.indexOf(id); return i < 0 ? 1e9 : i; }; return listos.slice().sort((a, b) => r(a.id) - r(b.id) || a.creado - b.creado); };
+function moverListo(id, d) {
+  const ch = listosOrd().filter(o => !quitados.has(o.id)).map(o => o.id), i = ch.indexOf(id), j = i + d;
+  if (i < 0 || j < 0 || j >= ch.length) return;
+  [ch[i], ch[j]] = [ch[j], ch[i]];
+  ordenSal = ch.concat(listos.map(o => o.id).filter(x => !ch.includes(x)));
+  render();
 }
 const geoTried = new Set();
 function ensureGeo(o) {
@@ -253,13 +266,14 @@ function entregado(o) {
 }
 function salir() {
   salirT = Date.now();
-  const ids = listos.filter(o => !quitados.has(o.id));
+  const ids = listosOrd().filter(o => !quitados.has(o.id));
   if (!ids.length) return;
   const t = Date.now(), base = orders.length;
   ids.forEach((o, i) => {
     updateDoc(ref('pedidos', o.id), { estado: 'camino', repartidor: ME, repartidorEmail: EMAIL, salio: t, orden: base + i, upd: t }).catch(e => toast('No se pudo guardar: ' + e.code));
     if (o.track) updateDoc(ref('track', o.track), { estado: 'camino', repartidor: ME, salio: t, upd: t }).catch(() => { });
   });
+  ordenSal = [];
   listos = listos.filter(o => !ids.includes(o)); // enseguida llegan por la otra consulta como "en camino"
   toast('Saliste con ' + ids.length + (ids.length > 1 ? ' pedidos' : ' pedido'));
   render();
@@ -276,7 +290,20 @@ function llegueLocal() {
   render();
 }
 function terminar() { fin = false; vuelta = false; stopGps(); render(); }
-function primero(o) { order = [o.id, ...stops().map(x => x.id).filter(id => id !== o.id)]; ls.set('rep_order', JSON.stringify(order)); sync(); }
+// Orden del recorrido: queda guardado en el celu y en el pedido (campo 'orden'), así sobrevive si se recarga la app.
+function aplicarOrden(ids) {
+  order = ids.slice(); ls.set('rep_order', JSON.stringify(order));
+  const t = Date.now();
+  ids.forEach((id, i) => { const o = orders.find(x => x.id === id); if (o && o.orden !== i) { o.orden = i; updateDoc(ref('pedidos', id), { orden: i, upd: t }).catch(() => { }); } });
+  route = null; sync();
+}
+function primero(o) { if (o) aplicarOrden([o.id, ...stops().map(x => x.id).filter(id => id !== o.id)]); }
+function mover(id, d) {
+  const ids = stops().map(x => x.id), i = ids.indexOf(id), j = i + d;
+  if (i < 0 || j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  aplicarOrden(ids);
+}
 let tt = 0;
 function toast(msg, label, fn) {
   document.querySelectorAll('.toast').forEach(x => x.remove());
@@ -421,9 +448,10 @@ function render() {
     '<span class="chip ' + gpsChip[0] + '"><i></i>' + gpsChip[1] + '</span><button class="chip" id="who" aria-label="Salir">' + esc(ME) + '</button></header>';
   let body, act = '';
   const chosen = listos.filter(o => !quitados.has(o.id));
-  const listosHtml = listos.length ? '<h3>Listos para salir</h3>' + listos.map(o => {
-    const cobrar = +o.cobrar || 0;
-    return '<label class="card pick"><input type="checkbox" data-pick="' + o.id + '"' + (quitados.has(o.id) ? '' : ' checked') + '><span class="cb"><span class="cn">#' + o.num + ' ' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' + (o.nota ? '<span class="cm">' + esc(o.nota) + '</span>' : '') + '</span>' +
+  const lord = listosOrd(), lch = lord.filter(o => !quitados.has(o.id));
+  const listosHtml = listos.length ? '<h3>Listos para salir</h3>' + (lch.length > 1 ? '<div class="cm">Elegí el orden en que los llevás con ↑ y ↓. El número es el orden de entrega.</div>' : '') + lord.map(o => {
+    const cobrar = +o.cobrar || 0, ix = lch.findIndex(x => x.id === o.id), mvs = ix >= 0 && lch.length > 1 ? '<span class="row"><button type="button" class="btn sm" data-lup="' + o.id + '"' + (ix === 0 ? ' disabled' : '') + ' aria-label="Llevar antes">↑ Antes</button><button type="button" class="btn sm" data-ldown="' + o.id + '"' + (ix === lch.length - 1 ? ' disabled' : '') + ' aria-label="Llevar después">↓ Después</button></span>' : '';
+    return '<label class="card pick"><input type="checkbox" data-pick="' + o.id + '"' + (quitados.has(o.id) ? '' : ' checked') + '><span class="cb"><span class="cn">' + (ix >= 0 && lch.length > 1 ? '<span class="ordn">' + (ix + 1) + '</span>' : '') + '#' + o.num + ' ' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' + (o.nota ? '<span class="cm">' + esc(o.nota) + '</span>' : '') + mvs + '</span>' +
       '<span class="pay ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></label>';
   }).join('') + (s.length || vuelta || fin ? '<button class="btn y" id="salir2"' + (chosen.length ? '' : ' disabled') + '>Sumar al recorrido (' + chosen.length + ')</button>' : '') : '';
   if (!s.length && vuelta) {
@@ -444,13 +472,13 @@ function render() {
       : gps === 'wait' ? '<div class="banner">Buscando señal GPS… Dejá la pantalla prendida: hasta que no la encuentre, el cliente no ve la moto.</div>'
       : gps === 'ok' && !lock ? '<div class="banner">Dejá esta pantalla abierta y prendida mientras repartís. Si cambiás de app o apagás la pantalla, el cliente deja de ver la moto.</div>' : '');
     const ruta = s.length > 1 ? '<a class="btn" href="' + esc(routeUrl(s)) + '" target="_blank" rel="noopener">Ruta completa en Google Maps (' + Math.min(s.length, 10) + ' paradas)</a>' : '';
-    const hint = '<div class="cm">Tocá el mapa para verlo en pantalla completa. Mientras Google Maps está abierto, el cliente no ve la moto en vivo. Al llegar, volvé a esta app y tocá «Llegué».</div>';
+    const hint = (s.length > 1 ? '<div class="cm"><b>Recorrido:</b> cambiá el orden con ↑ ↓ o «Ir primero». El cliente ve la moto y cuántos le faltan según este orden.</div>' : '') + '<div class="cm">Tocá el mapa para verlo en pantalla completa. Mientras Google Maps está abierto, el cliente no ve la moto en vivo. Al llegar, volvé a esta app y tocá «Llegué».</div>';
     body = '<div class="scroll">' + warn + '<div id="mapslot"></div>' + ruta + hint + s.map((o, i) => {
       const on = i === 0, cobrar = +o.cobrar || 0;
       return '<div class="card' + (on ? ' on' : '') + '"><div class="ct"><div class="num">' + (i + 1) + '</div><div class="cb"><span class="cn">' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' +
         '<span class="cm"><span>Pedido #' + o.num + '</span>' + (o.nota ? '<span>' + esc(o.nota) + '</span>' : '') + '</span></div>' +
         '<span class="pay ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></div>' +
-        '<div class="row">' + (mapsQ(o) ? '<a class="btn y" href="' + esc(navUrl(o)) + '" target="_blank" rel="noopener">Ir con Google Maps</a>' : '') + (o.tel ? '<a class="btn" href="tel:' + esc(String(o.tel).replace(/[^\d+]/g, '')) + '">Llamar</a>' : '') + (!on ? '<button class="btn" data-first="' + o.id + '">Ir primero</button>' : '') + '</div></div>';
+        '<div class="row">' + (mapsQ(o) ? '<a class="btn y" href="' + esc(navUrl(o)) + '" target="_blank" rel="noopener">Ir con Google Maps</a>' : '') + (o.tel ? '<a class="btn" href="tel:' + esc(String(o.tel).replace(/[^\d+]/g, '')) + '">Llamar</a>' : '') + (i > 0 ? '<button class="btn mv" data-up="' + o.id + '" aria-label="Subir en el recorrido">↑</button>' : '') + (i < s.length - 1 ? '<button class="btn mv" data-down="' + o.id + '" aria-label="Bajar en el recorrido">↓</button>' : '') + (i > 1 ? '<button class="btn" data-first="' + o.id + '">Ir primero</button>' : '') + '</div></div>';
     }).join('') + listosHtml + '</div>';
     const got = !!cur.llegoT;
     act = '<div class="act"><button class="go ' + (got ? 'ok' : '') + '" id="go">' + (got ? 'Entregado ✓' : 'Llegué a ' + esc(cur.nombre || 'destino')) + '</button></div>';
@@ -460,6 +488,10 @@ function render() {
   $app.innerHTML = html; render.last = html;
   const w = document.getElementById('who'); if (w) w.onclick = logout;
   document.querySelectorAll('[data-first]').forEach(b => b.onclick = () => primero(orders.find(x => x.id === b.dataset.first)));
+  document.querySelectorAll('[data-up]').forEach(b => b.onclick = () => mover(b.dataset.up, -1));
+  document.querySelectorAll('[data-down]').forEach(b => b.onclick = () => mover(b.dataset.down, 1));
+  document.querySelectorAll('[data-lup]').forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); moverListo(b.dataset.lup, -1); });
+  document.querySelectorAll('[data-ldown]').forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); moverListo(b.dataset.ldown, 1); });
   document.querySelectorAll('[data-pick]').forEach(c => c.onchange = () => { c.checked ? quitados.delete(c.dataset.pick) : quitados.add(c.dataset.pick); render(); });
   ['salir', 'salir2'].forEach(id => { const b = document.getElementById(id); if (b) b.onclick = salir; });
   const g = document.getElementById('go'); if (g) g.onclick = () => { const o = stops()[0]; if (o) o.llegoT ? entregado(o) : llego(o); else if (vuelta) llegueLocal(); };
