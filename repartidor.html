@@ -297,6 +297,43 @@ function aplicarOrden(ids) {
   ids.forEach((id, i) => { const o = orders.find(x => x.id === id); if (o && o.orden !== i) { o.orden = i; updateDoc(ref('pedidos', id), { orden: i, upd: t }).catch(() => { }); } });
   route = null; sync();
 }
+// Sugerir orden: el recorrido más corto en línea recta (prueba todas las combinaciones hasta 7 paradas; con más, va siempre al más cercano).
+const nearBase = () => LOC && LOC.base ? { lat: LOC.base.lat, lng: LOC.base.lng, km: (+LOC.radio > 0 ? +LOC.radio : 6) } : null;
+async function ubicar(list) { await Promise.all(list.filter(o => !o.geo && o.dir).map(async o => { try { const g = await GEO.geocode(o.dir, nearBase()); if (g) o.geo = g; } catch { } })); }
+function mejorOrden(list, start) {
+  const con = list.filter(o => o.geo), sin = list.filter(o => !o.geo);
+  if (con.length < 2) return list.slice();
+  const d = (a, b) => GEO.dist(a, b), cost = seq => seq.reduce((t, o, i) => t + (i === 0 ? (start ? d(start, o.geo) : 0) : d(seq[i - 1].geo, o.geo)), 0);
+  let best = null;
+  if (con.length <= 7) {
+    let bc = 1e18; const perm = (rest, acc) => { if (!rest.length) { const c = cost(acc); if (c < bc) { bc = c; best = acc.slice(); } return; } rest.forEach((o, i) => perm(rest.filter((_, j) => j !== i), acc.concat(o))); };
+    perm(con, []);
+  } else {
+    best = []; let rest = con.slice(), cur = start;
+    while (rest.length) { let bi = 0, bd = 1e18; rest.forEach((o, i) => { const x = cur ? d(cur, o.geo) : i; if (x < bd) { bd = x; bi = i; } }); const n = rest.splice(bi, 1)[0]; best.push(n); cur = n.geo; }
+  }
+  return best.concat(sin);
+}
+async function sugerir() {
+  const s = stops(); if (s.length < 2) return;
+  toast('Calculando el mejor orden…');
+  await ubicar(s);
+  const antes = s.map(o => o.id), fijo = s[0].llegoT ? [s[0]] : [], resto = s.filter(o => !fijo.includes(o));
+  const start = fijo.length ? fijo[0].geo : (pos || (LOC && LOC.base) || null);
+  const nuevo = fijo.concat(mejorOrden(resto, start)).map(o => o.id);
+  if (nuevo.join() === antes.join()) { toast('Ya está en el orden más corto'); return; }
+  aplicarOrden(nuevo);
+  toast('Ordené por cercanía', 'Deshacer', () => aplicarOrden(antes));
+}
+async function sugerirListos() {
+  const ch = listosOrd().filter(o => !quitados.has(o.id)); if (ch.length < 2) return;
+  toast('Calculando el mejor orden…');
+  await ubicar(ch);
+  const antes = ordenSal.slice(), nuevo = mejorOrden(ch, LOC && LOC.base ? LOC.base : null).map(o => o.id);
+  ordenSal = nuevo.concat(listos.map(o => o.id).filter(x => !nuevo.includes(x)));
+  render();
+  toast('Ordené por cercanía', 'Deshacer', () => { ordenSal = antes; render(); });
+}
 function primero(o) { if (o) aplicarOrden([o.id, ...stops().map(x => x.id).filter(id => id !== o.id)]); }
 function mover(id, d) {
   const ids = stops().map(x => x.id), i = ids.indexOf(id), j = i + d;
@@ -449,7 +486,7 @@ function render() {
   let body, act = '';
   const chosen = listos.filter(o => !quitados.has(o.id));
   const lord = listosOrd(), lch = lord.filter(o => !quitados.has(o.id));
-  const listosHtml = listos.length ? '<h3>Listos para salir</h3>' + (lch.length > 1 ? '<div class="cm">Elegí el orden en que los llevás con ↑ y ↓. El número es el orden de entrega.</div>' : '') + lord.map(o => {
+  const listosHtml = listos.length ? '<h3>Listos para salir</h3>' + (lch.length > 1 ? '<div class="cm">Elegí el orden en que los llevás con ↑ y ↓. El número es el orden de entrega.</div><button type="button" class="btn" id="sugl">Sugerir orden por cercanía</button>' : '') + lord.map(o => {
     const cobrar = +o.cobrar || 0, ix = lch.findIndex(x => x.id === o.id), mvs = ix >= 0 && lch.length > 1 ? '<span class="row"><button type="button" class="btn sm" data-lup="' + o.id + '"' + (ix === 0 ? ' disabled' : '') + ' aria-label="Llevar antes">↑ Antes</button><button type="button" class="btn sm" data-ldown="' + o.id + '"' + (ix === lch.length - 1 ? ' disabled' : '') + ' aria-label="Llevar después">↓ Después</button></span>' : '';
     return '<label class="card pick"><input type="checkbox" data-pick="' + o.id + '"' + (quitados.has(o.id) ? '' : ' checked') + '><span class="cb"><span class="cn">' + (ix >= 0 && lch.length > 1 ? '<span class="ordn">' + (ix + 1) + '</span>' : '') + '#' + o.num + ' ' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' + (o.nota ? '<span class="cm">' + esc(o.nota) + '</span>' : '') + mvs + '</span>' +
       '<span class="pay ' + (cobrar > 0 ? 'cobrar' : 'ok') + '">' + (cobrar > 0 ? 'Cobrar ' + money(cobrar) : 'Pagado') + '</span></label>';
@@ -472,8 +509,9 @@ function render() {
       : gps === 'wait' ? '<div class="banner">Buscando señal GPS… Dejá la pantalla prendida: hasta que no la encuentre, el cliente no ve la moto.</div>'
       : gps === 'ok' && !lock ? '<div class="banner">Dejá esta pantalla abierta y prendida mientras repartís. Si cambiás de app o apagás la pantalla, el cliente deja de ver la moto.</div>' : '');
     const ruta = s.length > 1 ? '<a class="btn" href="' + esc(routeUrl(s)) + '" target="_blank" rel="noopener">Ruta completa en Google Maps (' + Math.min(s.length, 10) + ' paradas)</a>' : '';
+    const sug = s.length > 1 ? '<button type="button" class="btn" id="sug">Sugerir orden por cercanía</button>' : '';
     const hint = (s.length > 1 ? '<div class="cm"><b>Recorrido:</b> cambiá el orden con ↑ ↓ o «Ir primero». El cliente ve la moto y cuántos le faltan según este orden.</div>' : '') + '<div class="cm">Tocá el mapa para verlo en pantalla completa. Mientras Google Maps está abierto, el cliente no ve la moto en vivo. Al llegar, volvé a esta app y tocá «Llegué».</div>';
-    body = '<div class="scroll">' + warn + '<div id="mapslot"></div>' + ruta + hint + s.map((o, i) => {
+    body = '<div class="scroll">' + warn + '<div id="mapslot"></div>' + ruta + sug + hint + s.map((o, i) => {
       const on = i === 0, cobrar = +o.cobrar || 0;
       return '<div class="card' + (on ? ' on' : '') + '"><div class="ct"><div class="num">' + (i + 1) + '</div><div class="cb"><span class="cn">' + esc(o.nombre) + '</span><span class="cd">' + esc(o.dir) + (o.depto ? ' · ' + esc(o.depto) : '') + '</span>' +
         '<span class="cm"><span>Pedido #' + o.num + '</span>' + (o.nota ? '<span>' + esc(o.nota) + '</span>' : '') + '</span></div>' +
@@ -488,6 +526,8 @@ function render() {
   $app.innerHTML = html; render.last = html;
   const w = document.getElementById('who'); if (w) w.onclick = logout;
   document.querySelectorAll('[data-first]').forEach(b => b.onclick = () => primero(orders.find(x => x.id === b.dataset.first)));
+  const bs = document.getElementById('sug'); if (bs) bs.onclick = sugerir;
+  const bl = document.getElementById('sugl'); if (bl) bl.onclick = sugerirListos;
   document.querySelectorAll('[data-up]').forEach(b => b.onclick = () => mover(b.dataset.up, -1));
   document.querySelectorAll('[data-down]').forEach(b => b.onclick = () => mover(b.dataset.down, 1));
   document.querySelectorAll('[data-lup]').forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); moverListo(b.dataset.lup, -1); });
